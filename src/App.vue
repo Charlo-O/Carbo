@@ -1,29 +1,21 @@
-<!-- @format -->
-
 <template>
-  <div id="app" style="text-autospace: normal">
-    <router-view></router-view>
+  <div id="app">
+    <router-view />
   </div>
 </template>
 
-<script>
-export default {
-  name: 'app',
-
-  components: {},
-}
+<script setup lang="ts">
+// App.vue - Root component using Composition API
 </script>
 
-<style lang="less">
-@import './assets/styles/element/index.css';
-@import './assets/styles/style.less';
-@import '~vditor/dist/index.css';
+<style>
+@import './assets/styles/main.css';
 
 #app {
-  font-family: 'Avenir', Helvetica, Arial, sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  text-align: center;
-  color: #2c3e50;
+  width: 100%;
+  height: 100vh;
 }
 </style>

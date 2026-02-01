@@ -1,91 +1,103 @@
-<!-- @format -->
-
 <template>
   <div class="export-page">
-    <div class="button-group">
-      <el-button round @click="onBackToMainPage">返回主页</el-button>
-      <el-button round @click="onExportBtnClick" type="primary" :disabled="exporting">
-        {{ exporting ? '正在导出...' : '生成导出' }}
-      </el-button>
+    <div class="export-header">
+      <router-link to="/" class="back-btn">← 返回</router-link>
+      <h1>导出 PDF</h1>
     </div>
-    <PreviewVditor :pdata="pdata" />
+    <div class="export-content">
+      <div class="preview-area" ref="previewRef">
+        <div v-html="htmlContent" class="markdown-body"></div>
+      </div>
+      <div class="export-actions">
+        <el-button type="primary" @click="exportPdf">导出 PDF</el-button>
+      </div>
+    </div>
   </div>
 </template>
 
-<script>
-import html2pdf from 'html2pdf.js'
-import PreviewVditor from '@components/PreviewVditor'
+<script setup lang="ts">
+import { ref, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
+import Vditor from 'vditor'
 
-export default {
-  name: 'export-pdf',
+const previewRef = ref<HTMLElement | null>(null)
+const htmlContent = ref('')
 
-  data() {
-    return {
-      isLoading: true,
-      pdata: localStorage.getItem('vditorvditor'),
-      exporting: false,
-    }
-  },
+const STORAGE_KEY = 'carbo-markdown-content'
 
-  created() {},
+onMounted(async () => {
+  const markdown = localStorage.getItem(STORAGE_KEY) || ''
+  htmlContent.value = await Vditor.md2html(markdown)
+})
 
-  components: {
-    PreviewVditor,
-  },
-
-  mounted() {},
-
-  methods: {
-    exportAndDownloadPdf(element, filename) {
-      const scale = window.devicePixelRatio
-      const opt = {
-        margin: 1,
-        filename: filename,
-        html2canvas: {
-          scale,
-          // 只捕获可见区域
-          useCORS: true,
-          logging: false,
-          // 确保所有内容都被渲染
-          scrollY: 0,
-          scrollX: 0,
-          // 排除 vditor-preview__action 元素
-          ignoreElements: (element) => {
-            return element.classList.contains('vditor-preview__action')
-          },
-        },
-        jsPDF: {
-          unit: 'in',
-          format: 'letter',
-          orientation: 'portrait',
-        },
-      }
-      html2pdf()
-        .set(opt)
-        .from(element)
-        .save()
-        .then(() => {
-          this.isLoading = false
-          this.exporting = false
-        })
-        .catch((error) => {
-          console.error('PDF导出失败:', error)
-          this.isLoading = false
-          this.exporting = false
-          this.$message.error('PDF导出失败，请重试')
-        })
-    },
-    /* ---------------------Callback Event--------------------- */
-    onBackToMainPage() {
-      this.$router.push('/')
-    },
-    onExportBtnClick() {
-      this.isLoading = true
-      this.exporting = true
-      const visibleElement = document.querySelector('#khaleesi .vditor-preview')
-      const filename = this.$utils.getExportFileName()
-      this.exportAndDownloadPdf(visibleElement || document.querySelector('#khaleesi'), filename)
-    },
-  },
+const exportPdf = () => {
+  try {
+    window.print()
+    ElMessage.success('请在打印对话框中选择"另存为 PDF"')
+  } catch (error) {
+    ElMessage.error('导出失败')
+    console.error(error)
+  }
 }
 </script>
+
+<style scoped>
+.export-page {
+  min-height: 100vh;
+  background-color: var(--color-bg-secondary);
+  padding: var(--space-6);
+}
+
+.export-header {
+  max-width: 800px;
+  margin: 0 auto var(--space-6);
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.export-header h1 {
+  font-size: var(--text-xl);
+  font-weight: var(--font-weight-semibold);
+}
+
+.back-btn {
+  color: var(--color-text-secondary);
+}
+
+.export-content {
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.preview-area {
+  background-color: var(--color-bg-primary);
+  border-radius: var(--radius-lg);
+  padding: var(--space-8);
+  margin-bottom: var(--space-4);
+  box-shadow: var(--shadow-md);
+}
+
+.export-actions {
+  display: flex;
+  gap: var(--space-3);
+  justify-content: center;
+}
+
+@media print {
+  .export-header,
+  .export-actions {
+    display: none;
+  }
+  
+  .export-page {
+    padding: 0;
+    background: white;
+  }
+  
+  .preview-area {
+    box-shadow: none;
+    border-radius: 0;
+  }
+}
+</style>
