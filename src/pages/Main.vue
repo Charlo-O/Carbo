@@ -2,9 +2,9 @@
   <div 
     class="main-page" 
     v-loading="isLoading"
-    @dragover.prevent="onDragOver"
-    @dragleave.prevent="onDragLeave"
-    @drop.prevent="onDrop"
+    @dragover="onDragOver"
+    @dragleave="onDragLeave"
+    @drop="onDrop"
   >
     <!-- Header Navigation -->
     <header class="header-nav">
@@ -67,6 +67,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import Vditor from 'vditor'
 import { defaultContent } from '@config/default'
+import { convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core'
 
 const router = useRouter()
 
@@ -106,7 +107,7 @@ const initVditor = () => {
 
           const filePath = getDroppedFilePath(file)
           if (filePath) {
-            insertImageFromPath(filePath)
+            await insertImageFromDiskPath(filePath)
             continue
           }
 
@@ -152,42 +153,11 @@ type UnlistenFn = () => void
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null
 
-const isUnlistenFn = (v: unknown): v is UnlistenFn => typeof v === 'function'
-
-const isPromiseLike = (v: unknown): v is PromiseLike<unknown> => isRecord(v) && typeof v['then'] === 'function'
-
-const getTauriConvertFileSrc = () => {
-  const tauri = window.__TAURI__
-  if (!isRecord(tauri)) return null
-  const core = tauri['core']
-  if (!isRecord(core)) return null
-  const convertFileSrc = core['convertFileSrc']
-  if (typeof convertFileSrc !== 'function') return null
-  return (filePath: string) => {
-    const maybeUrl = convertFileSrc(filePath)
-    return typeof maybeUrl === 'string' ? maybeUrl : filePath
-  }
+const devLog = (...args: unknown[]) => {
+  if (import.meta.env.DEV) console.log(...args)
 }
 
-const getTauriInvoke = () => {
-  const tauri = window.__TAURI__
-  if (!isRecord(tauri)) return null
-  const core = tauri['core']
-  if (!isRecord(core)) return null
-  const invoke = core['invoke']
-  if (typeof invoke !== 'function') return null
-  return invoke as (cmd: string, args?: Record<string, unknown>) => Promise<unknown>
-}
-
-const getTauriEventListen = () => {
-  const tauri = window.__TAURI__
-  if (!isRecord(tauri)) return null
-  const event = tauri['event']
-  if (!isRecord(event)) return null
-  const listen = event['listen']
-  if (typeof listen !== 'function') return null
-  return listen
-}
+const isTauriRuntime = () => isTauri()
 
 const toFileUrl = (filePath: string) => {
   const path = filePath.replace(/\\/g, '/')
@@ -241,11 +211,15 @@ const getDroppedFilePath = (file: File) => {
 
 const openMarkdownFromPath = async (filePath: string) => {
   if (!vditor) return
-  const convertFileSrc = getTauriConvertFileSrc()
-  const url = convertFileSrc ? convertFileSrc(filePath) : toFileUrl(filePath)
-  const res = await fetch(url)
-  if (!res.ok) throw new Error('Failed to read file')
-  const content = await res.text()
+  const content = isTauriRuntime()
+    ? await invoke<string>('read_text_file', { path: filePath })
+    : await (async () => {
+        const url = toFileUrl(filePath)
+        const res = await fetch(url)
+        if (!res.ok) throw new Error('Failed to read file')
+        return await res.text()
+      })()
+
   vditor.setValue(content)
   localStorage.setItem(STORAGE_KEY, content)
   ElMessage.success(`已打开: ${basename(filePath)}`)
@@ -253,22 +227,31 @@ const openMarkdownFromPath = async (filePath: string) => {
 
 const insertImageFromPath = (filePath: string) => {
   if (!vditor) return
-  const convertFileSrc = getTauriConvertFileSrc()
-  const url = convertFileSrc ? convertFileSrc(filePath) : toFileUrl(filePath)
+  const url = isTauriRuntime() ? convertFileSrc(filePath) : toFileUrl(filePath)
   vditor.insertValue(`![${basename(filePath)}](${url})`)
 }
 
+const ensureImageInAppData = async (filePath: string) => {
+  if (!isTauriRuntime()) return filePath
+  return await invoke<string>('copy_image_to_app_data', { path: filePath })
+}
+
+const insertImageFromDiskPath = async (filePath: string) => {
+  const resolvedPath = await ensureImageInAppData(filePath)
+  insertImageFromPath(resolvedPath)
+  return resolvedPath
+}
+
 const saveImageToAppData = async (file: File) => {
-  const invoke = getTauriInvoke()
-  if (!invoke) return null
+  if (!isTauriRuntime()) return null
   const buffer = await file.arrayBuffer()
   const bytes = Array.from(new Uint8Array(buffer))
 
-  const result = await invoke('save_image_bytes', {
+  const result = await invoke<string>('save_image_bytes', {
     file_name: file.name,
     bytes
   })
-  return typeof result === 'string' ? result : null
+  return result
 }
 
 const handleDroppedPaths = async (paths: string[]) => {
@@ -284,7 +267,7 @@ const handleDroppedPaths = async (paths: string[]) => {
 
     const images = paths.filter(isImagePath)
     if (images.length > 0) {
-      for (const imgPath of images) insertImageFromPath(imgPath)
+      for (const imgPath of images) await insertImageFromDiskPath(imgPath)
       ElMessage.success(images.length === 1 ? `已插入图片: ${basename(images[0])}` : `已插入 ${images.length} 张图片`)
     }
   } catch {
@@ -316,7 +299,7 @@ const handleDroppedFiles = async (fileList: FileList) => {
       for (const img of images) {
         const filePath = getDroppedFilePath(img)
         if (filePath) {
-          insertImageFromPath(filePath)
+          await insertImageFromDiskPath(filePath)
           continue
         }
 
@@ -338,29 +321,36 @@ const handleDroppedFiles = async (fileList: FileList) => {
 
 // Drag and drop handlers
 const onDragOver = (e: DragEvent) => {
+  if (isTauriRuntime()) return
   if (!isFileDrag(e)) return
+  e.preventDefault()
   isDragging.value = true
 }
 
 const onDragLeave = (e: DragEvent) => {
+  if (isTauriRuntime()) return
   if (!isFileDrag(e)) return
   isDragging.value = false
 }
 
 const onDrop = (e: DragEvent) => {
+  if (isTauriRuntime()) return
   if (!isFileDrag(e)) return
+  e.preventDefault()
   isDragging.value = false
   const files = e.dataTransfer?.files
   if (files) void handleDroppedFiles(files)
 }
 
 const onWindowDragOverCapture = (e: DragEvent) => {
+  if (isTauriRuntime()) return
   if (!isFileDrag(e)) return
   // Ensure dropping works even if inner components stop propagation.
   e.preventDefault()
 }
 
 const onWindowDropCapture = (e: DragEvent) => {
+  if (isTauriRuntime()) return
   if (!isFileDrag(e)) return
   e.preventDefault()
   isDragging.value = false
@@ -369,54 +359,36 @@ const onWindowDropCapture = (e: DragEvent) => {
 }
 
 let tauriUnlistenFileDrop: UnlistenFn | null = null
-let tauriUnlistenFileDropHover: UnlistenFn | null = null
-let tauriUnlistenFileDropCancelled: UnlistenFn | null = null
 
-const setupTauriFileDrop = () => {
-  const listen = getTauriEventListen()
-  if (!listen) return
+const setupTauriFileDrop = async () => {
+  // Tauri v2: use the dedicated drag/drop API to receive real filesystem paths.
+  if (!isTauriRuntime()) return
 
-  const attach = (eventName: string, handler: (event: unknown) => void, onUnlisten: (fn: UnlistenFn) => void) => {
-    const result = listen(eventName, handler)
-    if (isPromiseLike(result)) {
-      Promise.resolve(result)
-        .then((maybeFn) => {
-          if (isUnlistenFn(maybeFn)) onUnlisten(maybeFn)
-        })
-        .catch(() => {})
-    } else if (isUnlistenFn(result)) {
-      onUnlisten(result)
-    }
+  try {
+    const { getCurrentWebview } = await import('@tauri-apps/api/webview')
+    devLog('[drag-drop] register onDragDropEvent')
+
+    tauriUnlistenFileDrop = await getCurrentWebview().onDragDropEvent((event) => {
+      devLog('[drag-drop] event', event.payload.type)
+
+      if (event.payload.type === 'over') {
+        isDragging.value = true
+        return
+      }
+
+      if (event.payload.type === 'drop') {
+        isDragging.value = false
+        void handleDroppedPaths(event.payload.paths)
+        return
+      }
+
+      // cancelled
+      isDragging.value = false
+    })
+  } catch (err) {
+    console.error('[drag-drop] failed to register', err)
+    if (import.meta.env.DEV) ElMessage.error('拖拽监听初始化失败（请打开 DevTools 看 console）')
   }
-
-  attach(
-    'tauri://file-drop',
-    (event) => {
-      isDragging.value = false
-      if (!isRecord(event)) return
-      const payload = event['payload']
-      if (!Array.isArray(payload)) return
-      const paths = payload.filter((p): p is string => typeof p === 'string')
-      if (paths.length > 0) void handleDroppedPaths(paths)
-    },
-    (fn) => (tauriUnlistenFileDrop = fn)
-  )
-
-  attach(
-    'tauri://file-drop-hover',
-    () => {
-      isDragging.value = true
-    },
-    (fn) => (tauriUnlistenFileDropHover = fn)
-  )
-
-  attach(
-    'tauri://file-drop-cancelled',
-    () => {
-      isDragging.value = false
-    },
-    (fn) => (tauriUnlistenFileDropCancelled = fn)
-  )
 }
 
 // Export handlers
@@ -498,20 +470,21 @@ onMounted(() => {
   setDefaultContent()
   initVditor()
 
-  // Capture file drops globally so OS drag-drop opens files even when dropping on the editor toolbar/content.
-  window.addEventListener('dragover', onWindowDragOverCapture, true)
-  window.addEventListener('drop', onWindowDropCapture, true)
+  // Web fallback: use HTML5 drag/drop to read File objects.
+  if (!isTauriRuntime()) {
+    // Capture file drops globally so dropping works even if inner components stop propagation.
+    window.addEventListener('dragover', onWindowDragOverCapture, true)
+    window.addEventListener('drop', onWindowDropCapture, true)
+  }
 
-  // Prefer Tauri-native file-drop events when available (gives us real file paths).
-  setupTauriFileDrop()
+  // Tauri: native drag/drop yields real filesystem paths.
+  void setupTauriFileDrop()
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('dragover', onWindowDragOverCapture, true)
   window.removeEventListener('drop', onWindowDropCapture, true)
   tauriUnlistenFileDrop?.()
-  tauriUnlistenFileDropHover?.()
-  tauriUnlistenFileDropCancelled?.()
   vditor?.destroy()
 })
 </script>
