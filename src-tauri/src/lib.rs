@@ -1,6 +1,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
+use image::GenericImageView;
 use serde::{Deserialize, Serialize};
 use tauri::{path::BaseDirectory, Manager};
 
@@ -33,6 +34,38 @@ fn sanitize_git_path_component(input: &str) -> String {
     }
 }
 
+fn compress_image_to_jpeg_under_limit(bytes: &[u8], max_bytes: usize) -> Result<Vec<u8>, String> {
+    use image::imageops::FilterType;
+
+    let mut img = image::load_from_memory(bytes).map_err(|e| e.to_string())?;
+
+    // Ensure largest dimension is within a reasonable bound.
+    let (w, h) = img.dimensions();
+    let max_dim: u32 = 1920;
+    let largest = w.max(h);
+    if largest > max_dim {
+        let scale = max_dim as f32 / largest as f32;
+        let nw = ((w as f32) * scale).round().max(1.0) as u32;
+        let nh = ((h as f32) * scale).round().max(1.0) as u32;
+        img = img.resize(nw, nh, FilterType::Lanczos3);
+    }
+
+    // Drop alpha by converting to RGB.
+    let img = image::DynamicImage::ImageRgb8(img.to_rgb8());
+
+    // Try decreasing quality.
+    for quality in [85u8, 80, 75, 70, 65, 60, 55, 50, 45] {
+        let mut out = Vec::new();
+        let mut enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, quality);
+        enc.encode_image(&img).map_err(|e| e.to_string())?;
+        if out.len() <= max_bytes {
+            return Ok(out);
+        }
+    }
+
+    Err("unable to compress image under size limit".to_string())
+}
+
 #[derive(Serialize)]
 struct GitHubPutContentReq {
     message: String,
@@ -50,8 +83,25 @@ struct GitHubContentInfo {
     path: String,
 }
 
+#[derive(Deserialize)]
+struct GitHubRepoResp {
+    permissions: Option<GitHubRepoPermissions>,
+}
+
+#[derive(Deserialize)]
+struct GitHubRepoPermissions {
+    push: Option<bool>,
+    admin: Option<bool>,
+}
+
+#[derive(Serialize)]
+struct GitHubValidateRepoResult {
+    push: bool,
+    admin: bool,
+}
+
 #[tauri::command]
-fn github_validate_repo(repo: String, token: String) -> Result<(), String> {
+fn github_validate_repo(repo: String, token: String) -> Result<GitHubValidateRepoResult, String> {
     let (owner, name) = parse_github_repo(&repo)?;
     let client = reqwest::blocking::Client::builder()
         .user_agent("Carbo Markdown Editor")
@@ -66,13 +116,25 @@ fn github_validate_repo(repo: String, token: String) -> Result<(), String> {
         .send()
         .map_err(|e| e.to_string())?;
 
-    if resp.status().is_success() {
-        Ok(())
-    } else {
+    if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().unwrap_or_default();
-        Err(format!("github validate failed: {} {}", status, body))
+        return Err(format!("github validate failed: {} {}", status, body));
     }
+
+    let parsed: GitHubRepoResp = resp.json().map_err(|e| e.to_string())?;
+    let push = parsed
+        .permissions
+        .as_ref()
+        .and_then(|p| p.push)
+        .unwrap_or(false);
+    let admin = parsed
+        .permissions
+        .as_ref()
+        .and_then(|p| p.admin)
+        .unwrap_or(false);
+
+    Ok(GitHubValidateRepoResult { push, admin })
 }
 
 #[tauri::command]
@@ -91,21 +153,22 @@ fn github_upload_image_from_path(
     if !meta.is_file() {
         return Err("not a file".to_string());
     }
-    if meta.len() > max_bytes {
-        return Err(format!(
-            "file too large: {} bytes (limit {})",
-            meta.len(),
-            max_bytes
-        ));
-    }
 
-    let bytes = std::fs::read(src).map_err(|e| e.to_string())?;
+    let original = std::fs::read(src).map_err(|e| e.to_string())?;
+    let target = max_bytes as usize;
 
-    let ext = src
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or("bin")
-        .to_ascii_lowercase();
+    let (bytes, ext) = if (original.len() as u64) <= max_bytes {
+        let ext = src
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("bin")
+            .to_ascii_lowercase();
+        (original, ext)
+    } else {
+        // Best effort: compress to JPEG under the given limit.
+        let compressed = compress_image_to_jpeg_under_limit(&original, target)?;
+        (compressed, "jpg".to_string())
+    };
 
     let file_stem = src.file_stem().and_then(|s| s.to_str()).unwrap_or("image");
     let file_stem = sanitize_git_path_component(file_stem);

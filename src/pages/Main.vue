@@ -127,7 +127,7 @@ type GitHubUploadJob = {
   localUrl: string
 }
 
-const MAX_GITHUB_CONTENTS_BYTES = 900 * 1024
+const MAX_GITHUB_CONTENTS_BYTES = 1_000_000
 
 const githubUploadQueue: GitHubUploadJob[] = []
 let githubUploadRunning = false
@@ -209,10 +209,16 @@ const validateImageBed = async () => {
 
   isValidatingImageBed.value = true
   try {
-    await invoke('github_validate_repo', { repo, token })
-    ElMessage.success('验证通过')
+    const result = await invoke<{ push: boolean; admin: boolean }>('github_validate_repo', { repo, token })
+    if (!result.push && !result.admin) {
+      ElMessage.error('验证失败：该账号对该仓库没有写权限（需要 collaborator write 或 owner/admin）')
+      return
+    }
+    ElMessage.success('验证通过（已确认账号对仓库有写权限）')
   } catch (e) {
-    ElMessage.error(`验证失败: ${String(e)}`)
+    ElMessage.error(
+      `验证失败: ${String(e)}\n\n需要检查：Repository access 包含该仓库；Permissions：Contents(Read and write) + Metadata(Read)。若为组织仓库还需授权 SSO。`
+    )
   } finally {
     isValidatingImageBed.value = false
   }
@@ -257,14 +263,21 @@ const runGitHubUploadQueue = async () => {
         const rawUrl = await invoke<string>('github_upload_image_from_path', {
           repo: cfg.repo,
           branch: cfg.branch,
-          path_prefix: cfg.pathPrefix,
+          pathPrefix: cfg.pathPrefix,
           token: cfg.token,
-          local_path: job.localPath,
-          max_bytes: MAX_GITHUB_CONTENTS_BYTES
+          localPath: job.localPath,
+          maxBytes: MAX_GITHUB_CONTENTS_BYTES
         })
         replaceUrlInEditor(job.localUrl, rawUrl)
       } catch (e) {
-        ElMessage.error(`图片上传失败: ${String(e)}`)
+        const msg = String(e)
+        if (msg.includes('Resource not accessible by personal access token')) {
+          ElMessage.error(
+            '图片上传失败：Token 无法写入该仓库。\n请检查：Repository access 包含该仓库；Permissions：Contents(Read and write) + Metadata(Read)；若为组织仓库需授权 SSO。'
+          )
+        } else {
+          ElMessage.error(`图片上传失败: ${msg}`)
+        }
       }
     }
   } finally {
