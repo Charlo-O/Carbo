@@ -38,6 +38,7 @@
               <el-dropdown-menu>
                 <el-dropdown-item command="import">导入文件</el-dropdown-item>
                 <el-dropdown-item command="clear">清空内容</el-dropdown-item>
+                <el-dropdown-item command="imagebed">图床设置</el-dropdown-item>
                 <el-dropdown-item divided command="about">关于</el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -58,11 +59,41 @@
     <div class="editor-wrapper">
       <div id="vditor" class="vditor-container" />
     </div>
+
+    <el-dialog v-model="isImageBedDialogOpen" title="GitHub 图床设置" width="520px">
+      <el-form :model="imageBedForm" label-width="120px">
+        <el-form-item label="启用">
+          <el-switch v-model="imageBedForm.enabled" />
+        </el-form-item>
+        <el-form-item label="仓库">
+          <el-input v-model="imageBedForm.repo" placeholder="owner/repo" autocomplete="off" />
+        </el-form-item>
+        <el-form-item label="分支">
+          <el-input v-model="imageBedForm.branch" placeholder="master" autocomplete="off" />
+        </el-form-item>
+        <el-form-item label="目录前缀">
+          <el-input v-model="imageBedForm.pathPrefix" placeholder="images" autocomplete="off" />
+        </el-form-item>
+        <el-form-item label="Token">
+          <el-input v-model="imageBedForm.token" placeholder="GitHub PAT" type="password" show-password autocomplete="off" />
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <div style="display: flex; justify-content: space-between; gap: 12px;">
+          <el-button :loading="isValidatingImageBed" @click="validateImageBed">验证</el-button>
+          <div style="display: flex; gap: 8px;">
+            <el-button @click="isImageBedDialogOpen = false">取消</el-button>
+            <el-button type="primary" :loading="isSavingImageBed" @click="saveImageBed">保存</el-button>
+          </div>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import Vditor from 'vditor'
@@ -78,6 +109,175 @@ let vditor: Vditor | null = null
 
 // Local storage key
 const STORAGE_KEY = 'carbo-markdown-content'
+
+// Image bed (MVP): store config in localStorage.
+// Note: Token in localStorage is NOT secure; MVP only.
+const IMAGE_BED_KEY = 'carbo-imagebed-config'
+
+type ImageBedConfig = {
+  enabled: boolean
+  repo: string
+  branch: string
+  pathPrefix: string
+  token: string
+}
+
+type GitHubUploadJob = {
+  localPath: string
+  localUrl: string
+}
+
+const MAX_GITHUB_CONTENTS_BYTES = 900 * 1024
+
+const githubUploadQueue: GitHubUploadJob[] = []
+let githubUploadRunning = false
+
+const isImageBedDialogOpen = ref(false)
+const isSavingImageBed = ref(false)
+const isValidatingImageBed = ref(false)
+
+const imageBedForm = reactive<ImageBedConfig>({
+  enabled: false,
+  repo: '',
+  branch: 'master',
+  pathPrefix: 'images',
+  token: ''
+})
+
+const loadImageBed = () => {
+  try {
+    const raw = localStorage.getItem(IMAGE_BED_KEY)
+    if (!raw) return
+    const parsed: unknown = JSON.parse(raw)
+    if (typeof parsed !== 'object' || parsed === null) return
+
+    const r = parsed as Partial<ImageBedConfig>
+    imageBedForm.enabled = Boolean(r.enabled)
+    if (typeof r.repo === 'string') imageBedForm.repo = r.repo
+    if (typeof r.branch === 'string') imageBedForm.branch = r.branch
+    if (typeof r.pathPrefix === 'string') imageBedForm.pathPrefix = r.pathPrefix
+    if (typeof r.token === 'string') imageBedForm.token = r.token
+  } catch {
+    // ignore
+  }
+}
+
+const saveImageBed = async () => {
+  const repo = imageBedForm.repo.trim()
+  const branch = imageBedForm.branch.trim() || 'master'
+  const pathPrefix = imageBedForm.pathPrefix.trim() || 'images'
+
+  if (imageBedForm.enabled) {
+    if (!repo || !/^[^/]+\/[^/]+$/.test(repo)) {
+      ElMessage.error('仓库格式应为 owner/repo')
+      return
+    }
+    if (!imageBedForm.token.trim()) {
+      ElMessage.error('Token 不能为空')
+      return
+    }
+  }
+
+  isSavingImageBed.value = true
+  try {
+    const cfg: ImageBedConfig = {
+      enabled: imageBedForm.enabled,
+      repo,
+      branch,
+      pathPrefix,
+      token: imageBedForm.token.trim()
+    }
+    localStorage.setItem(IMAGE_BED_KEY, JSON.stringify(cfg))
+    ElMessage.success('图床设置已保存')
+    isImageBedDialogOpen.value = false
+  } finally {
+    isSavingImageBed.value = false
+  }
+}
+
+const validateImageBed = async () => {
+  const repo = imageBedForm.repo.trim()
+  if (!repo || !/^[^/]+\/[^/]+$/.test(repo)) {
+    ElMessage.error('仓库格式应为 owner/repo')
+    return
+  }
+  const token = imageBedForm.token.trim()
+  if (!token) {
+    ElMessage.error('Token 不能为空')
+    return
+  }
+
+  isValidatingImageBed.value = true
+  try {
+    await invoke('github_validate_repo', { repo, token })
+    ElMessage.success('验证通过')
+  } catch (e) {
+    ElMessage.error(`验证失败: ${String(e)}`)
+  } finally {
+    isValidatingImageBed.value = false
+  }
+}
+
+const getActiveImageBedConfig = (): ImageBedConfig | null => {
+  if (!imageBedForm.enabled) return null
+  const repo = imageBedForm.repo.trim()
+  const token = imageBedForm.token.trim()
+  if (!repo || !token) return null
+  return {
+    enabled: true,
+    repo,
+    branch: imageBedForm.branch.trim() || 'master',
+    pathPrefix: imageBedForm.pathPrefix.trim() || 'images',
+    token
+  }
+}
+
+const replaceUrlInEditor = (fromUrl: string, toUrl: string) => {
+  if (!vditor) return
+  const value = vditor.getValue()
+  if (!value.includes(fromUrl)) return
+  const updated = value.split(fromUrl).join(toUrl)
+  if (updated === value) return
+  vditor.setValue(updated)
+  localStorage.setItem(STORAGE_KEY, updated)
+}
+
+const runGitHubUploadQueue = async () => {
+  if (githubUploadRunning) return
+  githubUploadRunning = true
+  try {
+    while (githubUploadQueue.length > 0) {
+      const cfg = getActiveImageBedConfig()
+      if (!cfg) break
+
+      const job = githubUploadQueue.shift()
+      if (!job) break
+
+      try {
+        const rawUrl = await invoke<string>('github_upload_image_from_path', {
+          repo: cfg.repo,
+          branch: cfg.branch,
+          path_prefix: cfg.pathPrefix,
+          token: cfg.token,
+          local_path: job.localPath,
+          max_bytes: MAX_GITHUB_CONTENTS_BYTES
+        })
+        replaceUrlInEditor(job.localUrl, rawUrl)
+      } catch (e) {
+        ElMessage.error(`图片上传失败: ${String(e)}`)
+      }
+    }
+  } finally {
+    githubUploadRunning = false
+  }
+}
+
+const enqueueGitHubUpload = (job: GitHubUploadJob) => {
+  const cfg = getActiveImageBedConfig()
+  if (!cfg) return
+  githubUploadQueue.push(job)
+  void runGitHubUploadQueue()
+}
 
 // Initialize Vditor editor with local image support
 const initVditor = () => {
@@ -113,7 +313,8 @@ const initVditor = () => {
 
           const savedPath = await saveImageToAppData(file)
           if (savedPath) {
-            insertImageFromPath(savedPath)
+            const localUrl = insertImageFromPath(savedPath)
+            if (localUrl) enqueueGitHubUpload({ localPath: savedPath, localUrl })
             continue
           }
 
@@ -226,19 +427,25 @@ const openMarkdownFromPath = async (filePath: string) => {
 }
 
 const insertImageFromPath = (filePath: string) => {
-  if (!vditor) return
+  if (!vditor) return null
   const url = isTauriRuntime() ? convertFileSrc(filePath) : toFileUrl(filePath)
   vditor.insertValue(`![${basename(filePath)}](${url})`)
+  return url
 }
 
 const ensureImageInAppData = async (filePath: string) => {
   if (!isTauriRuntime()) return filePath
+  const normalized = filePath.replace(/\\/g, '/')
+  if (normalized.includes('/carbo-assets/images/')) return filePath
   return await invoke<string>('copy_image_to_app_data', { path: filePath })
 }
 
 const insertImageFromDiskPath = async (filePath: string) => {
   const resolvedPath = await ensureImageInAppData(filePath)
-  insertImageFromPath(resolvedPath)
+  const localUrl = insertImageFromPath(resolvedPath)
+  if (localUrl) {
+    enqueueGitHubUpload({ localPath: resolvedPath, localUrl })
+  }
   return resolvedPath
 }
 
@@ -419,6 +626,9 @@ const handleSetting = async (command: string) => {
     case 'import':
       importFile()
       break
+    case 'imagebed':
+      isImageBedDialogOpen.value = true
+      break
     case 'clear':
       try {
         await ElMessageBox.confirm('确定要清空所有内容吗？', '提示', {
@@ -468,6 +678,7 @@ const importFile = () => {
 // Lifecycle hooks
 onMounted(() => {
   setDefaultContent()
+  loadImageBed()
   initVditor()
 
   // Web fallback: use HTML5 drag/drop to read File objects.
