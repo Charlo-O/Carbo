@@ -6,6 +6,9 @@ import { resolve } from 'path'
 export default defineConfig({
     plugins: [vue()],
 
+    // Use relative paths for Tauri production builds
+    base: './',
+
     resolve: {
         alias: {
             '@': resolve(__dirname, 'src'),
