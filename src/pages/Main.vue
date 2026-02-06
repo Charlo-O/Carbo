@@ -11,35 +11,38 @@
       <div class="header-content">
         <div class="header-logo">
           <router-link to="/" class="logo-link">
-            <span class="logo-icon">📝</span>
+            <img src="/src-tauri/icons/32x32.png" class="logo-img" alt="Carbo logo" />
             <span class="logo-text">Carbo</span>
           </router-link>
         </div>
         <div class="header-actions">
-          <el-dropdown trigger="click" @command="handleExport">
+          <el-dropdown trigger="click" @command="handleExport" popper-class="custom-dropdown">
             <button class="action-btn">
-              <span>导出</span>
+              <span>Export</span>
               <span class="dropdown-icon">▾</span>
             </button>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item command="image">导出图片</el-dropdown-item>
-                <el-dropdown-item command="pdf">导出 PDF</el-dropdown-item>
-                <el-dropdown-item command="ppt">PPT 预览</el-dropdown-item>
-                <el-dropdown-item command="html">复制 HTML</el-dropdown-item>
+                <el-dropdown-item command="image">Image</el-dropdown-item>
+                <el-dropdown-item command="pdf">PDF</el-dropdown-item>
+                <el-dropdown-item command="ppt">PPT Preview</el-dropdown-item>
+                <el-dropdown-item command="html">Copy HTML</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
-          <el-dropdown trigger="click" @command="handleSetting">
+          <el-dropdown trigger="click" @command="handleSetting" popper-class="custom-dropdown">
             <button class="action-btn icon-btn">
-              <span>⚙</span>
+              <svg class="settings-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+              </svg>
             </button>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item command="import">导入文件</el-dropdown-item>
-                <el-dropdown-item command="clear">清空内容</el-dropdown-item>
-                <el-dropdown-item command="imagebed">图床设置</el-dropdown-item>
-                <el-dropdown-item divided command="about">关于</el-dropdown-item>
+                <el-dropdown-item command="import">Import...</el-dropdown-item>
+                <el-dropdown-item command="clear">Clear All</el-dropdown-item>
+                <el-dropdown-item command="imagebed">Image Host</el-dropdown-item>
+                <el-dropdown-item divided command="about">About</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -51,7 +54,7 @@
     <div v-if="isDragging" class="drop-overlay">
       <div class="drop-message">
         <span class="drop-icon">📄</span>
-        <span>释放以打开文件</span>
+        <span>Drop to open</span>
       </div>
     </div>
 
@@ -60,31 +63,33 @@
       <div id="vditor" class="vditor-container" />
     </div>
 
-    <el-dialog v-model="isImageBedDialogOpen" title="GitHub 图床设置" width="520px">
-      <el-form :model="imageBedForm" label-width="120px">
-        <el-form-item label="启用">
+    <el-dialog v-model="isImageBedDialogOpen" title="Image Bed Settings" width="480px" class="custom-dialog">
+      <el-form :model="imageBedForm" label-position="top">
+        <el-form-item label="Enable GitHub Upload">
           <el-switch v-model="imageBedForm.enabled" />
         </el-form-item>
-        <el-form-item label="仓库">
-          <el-input v-model="imageBedForm.repo" placeholder="owner/repo" autocomplete="off" />
-        </el-form-item>
-        <el-form-item label="分支">
-          <el-input v-model="imageBedForm.branch" placeholder="master" autocomplete="off" />
-        </el-form-item>
-        <el-form-item label="目录前缀">
-          <el-input v-model="imageBedForm.pathPrefix" placeholder="images" autocomplete="off" />
-        </el-form-item>
-        <el-form-item label="Token">
-          <el-input v-model="imageBedForm.token" placeholder="GitHub PAT" type="password" show-password autocomplete="off" />
-        </el-form-item>
+        <template v-if="imageBedForm.enabled">
+          <el-form-item label="Repository (owner/repo)">
+            <el-input v-model="imageBedForm.repo" placeholder="e.g. username/assets" />
+          </el-form-item>
+          <el-form-item label="Branch">
+            <el-input v-model="imageBedForm.branch" placeholder="main" />
+          </el-form-item>
+          <el-form-item label="Path Prefix">
+            <el-input v-model="imageBedForm.pathPrefix" placeholder="images" />
+          </el-form-item>
+          <el-form-item label="Personal Access Token">
+            <el-input v-model="imageBedForm.token" placeholder="ghp_..." type="password" show-password />
+          </el-form-item>
+        </template>
       </el-form>
 
       <template #footer>
-        <div style="display: flex; justify-content: space-between; gap: 12px;">
-          <el-button :loading="isValidatingImageBed" @click="validateImageBed">验证</el-button>
-          <div style="display: flex; gap: 8px;">
-            <el-button @click="isImageBedDialogOpen = false">取消</el-button>
-            <el-button type="primary" :loading="isSavingImageBed" @click="saveImageBed">保存</el-button>
+        <div class="dialog-footer">
+          <el-button @click="validateImageBed" :loading="isValidatingImageBed" link>Test Connection</el-button>
+          <div>
+            <el-button @click="isImageBedDialogOpen = false">Cancel</el-button>
+            <el-button type="primary" :loading="isSavingImageBed" @click="saveImageBed">Save</el-button>
           </div>
         </div>
       </template>
@@ -139,7 +144,7 @@ const isValidatingImageBed = ref(false)
 const imageBedForm = reactive<ImageBedConfig>({
   enabled: false,
   repo: '',
-  branch: 'master',
+  branch: 'main',
   pathPrefix: 'images',
   token: ''
 })
@@ -164,16 +169,16 @@ const loadImageBed = () => {
 
 const saveImageBed = async () => {
   const repo = imageBedForm.repo.trim()
-  const branch = imageBedForm.branch.trim() || 'master'
+  const branch = imageBedForm.branch.trim() || 'main'
   const pathPrefix = imageBedForm.pathPrefix.trim() || 'images'
 
   if (imageBedForm.enabled) {
     if (!repo || !/^[^/]+\/[^/]+$/.test(repo)) {
-      ElMessage.error('仓库格式应为 owner/repo')
+      ElMessage.error('Invalid repo format (owner/repo)')
       return
     }
     if (!imageBedForm.token.trim()) {
-      ElMessage.error('Token 不能为空')
+      ElMessage.error('Token is required')
       return
     }
   }
@@ -188,7 +193,7 @@ const saveImageBed = async () => {
       token: imageBedForm.token.trim()
     }
     localStorage.setItem(IMAGE_BED_KEY, JSON.stringify(cfg))
-    ElMessage.success('图床设置已保存')
+    ElMessage.success('Settings saved')
     isImageBedDialogOpen.value = false
   } finally {
     isSavingImageBed.value = false
@@ -198,12 +203,12 @@ const saveImageBed = async () => {
 const validateImageBed = async () => {
   const repo = imageBedForm.repo.trim()
   if (!repo || !/^[^/]+\/[^/]+$/.test(repo)) {
-    ElMessage.error('仓库格式应为 owner/repo')
+    ElMessage.error('Invalid repo format')
     return
   }
   const token = imageBedForm.token.trim()
   if (!token) {
-    ElMessage.error('Token 不能为空')
+    ElMessage.error('Token is required')
     return
   }
 
@@ -211,14 +216,12 @@ const validateImageBed = async () => {
   try {
     const result = await invoke<{ push: boolean; admin: boolean }>('github_validate_repo', { repo, token })
     if (!result.push && !result.admin) {
-      ElMessage.error('验证失败：该账号对该仓库没有写权限（需要 collaborator write 或 owner/admin）')
+      ElMessage.error('Validation failed: No write access')
       return
     }
-    ElMessage.success('验证通过（已确认账号对仓库有写权限）')
+    ElMessage.success('Validation successful')
   } catch (e) {
-    ElMessage.error(
-      `验证失败: ${String(e)}\n\n需要检查：Repository access 包含该仓库；Permissions：Contents(Read and write) + Metadata(Read)。若为组织仓库还需授权 SSO。`
-    )
+    ElMessage.error(`Validation error: ${String(e)}`)
   } finally {
     isValidatingImageBed.value = false
   }
@@ -232,7 +235,7 @@ const getActiveImageBedConfig = (): ImageBedConfig | null => {
   return {
     enabled: true,
     repo,
-    branch: imageBedForm.branch.trim() || 'master',
+    branch: imageBedForm.branch.trim() || 'main',
     pathPrefix: imageBedForm.pathPrefix.trim() || 'images',
     token
   }
@@ -270,14 +273,7 @@ const runGitHubUploadQueue = async () => {
         })
         replaceUrlInEditor(job.localUrl, rawUrl)
       } catch (e) {
-        const msg = String(e)
-        if (msg.includes('Resource not accessible by personal access token')) {
-          ElMessage.error(
-            '图片上传失败：Token 无法写入该仓库。\n请检查：Repository access 包含该仓库；Permissions：Contents(Read and write) + Metadata(Read)；若为组织仓库需授权 SSO。'
-          )
-        } else {
-          ElMessage.error(`图片上传失败: ${msg}`)
-        }
+        ElMessage.error(`Upload failed: ${String(e)}`)
       }
     }
   } finally {
@@ -301,6 +297,12 @@ const initVditor = () => {
     counter: { enable: true, max: 999999 },
     typewriterMode: true,
     mode: 'sv',
+    toolbarConfig: {
+      pin: true
+    },
+    hint: {
+      delay: 200
+    },
     preview: {
       delay: 100
     },
@@ -313,7 +315,6 @@ const initVditor = () => {
       id: 'carbo-editor'
     },
     upload: {
-      // Handle local image paste/upload
       handler: async (files: File[]) => {
         for (const file of files) {
           if (!file.type.startsWith('image/')) continue
@@ -436,7 +437,7 @@ const openMarkdownFromPath = async (filePath: string) => {
 
   vditor.setValue(content)
   localStorage.setItem(STORAGE_KEY, content)
-  ElMessage.success(`已打开: ${basename(filePath)}`)
+  ElMessage.success(`Opened: ${basename(filePath)}`)
 }
 
 const insertImageFromPath = (filePath: string) => {
@@ -488,10 +489,10 @@ const handleDroppedPaths = async (paths: string[]) => {
     const images = paths.filter(isImagePath)
     if (images.length > 0) {
       for (const imgPath of images) await insertImageFromDiskPath(imgPath)
-      ElMessage.success(images.length === 1 ? `已插入图片: ${basename(images[0])}` : `已插入 ${images.length} 张图片`)
+      ElMessage.success(images.length === 1 ? `Inserted: ${basename(images[0])}` : `Inserted ${images.length} images`)
     }
   } catch {
-    ElMessage.error('打开文件失败')
+    ElMessage.error('Failed to open file')
   }
 }
 
@@ -509,7 +510,7 @@ const handleDroppedFiles = async (fileList: FileList) => {
       const content = await readFileAsText(openTarget)
       vditor.setValue(content)
       localStorage.setItem(STORAGE_KEY, content)
-      ElMessage.success(`已打开: ${openTarget.name}`)
+      ElMessage.success(`Opened: ${openTarget.name}`)
       return
     }
 
@@ -532,10 +533,10 @@ const handleDroppedFiles = async (fileList: FileList) => {
         const base64 = await readFileAsDataUrl(img)
         vditor.insertValue(`![${img.name}](${base64})`)
       }
-      ElMessage.success(images.length === 1 ? `已插入图片: ${images[0].name}` : `已插入 ${images.length} 张图片`)
+      ElMessage.success(images.length === 1 ? `Inserted: ${images[0].name}` : `Inserted ${images.length} images`)
     }
   } catch {
-    ElMessage.error('打开文件失败')
+    ElMessage.error('Failed to open file')
   }
 }
 
@@ -607,7 +608,7 @@ const setupTauriFileDrop = async () => {
     })
   } catch (err) {
     console.error('[drag-drop] failed to register', err)
-    if (import.meta.env.DEV) ElMessage.error('拖拽监听初始化失败（请打开 DevTools 看 console）')
+    if (import.meta.env.DEV) ElMessage.error('Drag drop init failed (check console)')
   }
 }
 
@@ -627,7 +628,7 @@ const handleExport = (command: string) => {
       const content = localStorage.getItem(STORAGE_KEY) || ''
       if (content) {
         navigator.clipboard.writeText(content)
-        ElMessage.success('内容已复制到剪贴板')
+        ElMessage.success('HTML copied to clipboard')
       }
       break
   }
@@ -644,9 +645,9 @@ const handleSetting = async (command: string) => {
       break
     case 'clear':
       try {
-        await ElMessageBox.confirm('确定要清空所有内容吗？', '提示', {
-          confirmButtonText: '确定',
-          cancelButtonText: '取消',
+        await ElMessageBox.confirm('Are you sure you want to clear all content?', 'Warning', {
+          confirmButtonText: 'Yes, clear it',
+          cancelButtonText: 'Cancel',
           type: 'warning'
         })
         localStorage.removeItem(STORAGE_KEY)
@@ -719,7 +720,7 @@ onBeforeUnmount(() => {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background-color: #FAFAFA;
+  background-color: var(--color-bg-primary);
   position: relative;
 }
 
@@ -729,17 +730,17 @@ onBeforeUnmount(() => {
   top: 0;
   left: 0;
   right: 0;
-  height: 56px;
-  background-color: #FFFFFF;
-  border-bottom: 1px solid #E5E5E5;
+  height: var(--header-height);
+  background-color: var(--color-bg-primary);
+  border-bottom: 1px solid var(--color-border);
   z-index: 1000;
 }
 
 .header-content {
-  max-width: 1200px;
+  max-width: var(--max-content-width);
   height: 100%;
   margin: 0 auto;
-  padding: 0 16px;
+  padding: 0 var(--space-4);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -752,164 +753,198 @@ onBeforeUnmount(() => {
 .logo-link {
   display: flex;
   align-items: center;
-  gap: 8px;
-  color: #1A1A1A;
+  gap: var(--space-2);
+  color: var(--color-text-primary);
   font-weight: 600;
-  font-size: 18px;
+  font-size: 16px;
   text-decoration: none;
+  letter-spacing: -0.01em;
 }
 
-.logo-icon {
-  font-size: 20px;
+.logo-img {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  object-fit: contain;
+  flex: 0 0 auto;
 }
 
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .action-btn {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 8px 12px;
+  padding: 6px 10px;
   background-color: transparent;
-  color: #1A1A1A;
+  color: var(--color-text-secondary);
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  transition: background-color 0.15s ease;
+  transition: all var(--transition-fast);
 }
 
 .action-btn:hover {
-  background-color: #F0F0F0;
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
 }
 
 .action-btn.icon-btn {
-  padding: 8px;
-  font-size: 16px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 999px;
+}
+
+.settings-icon {
+  width: 18px;
+  height: 18px;
 }
 
 .dropdown-icon {
-  font-size: 12px;
-  opacity: 0.6;
+  font-size: 10px;
+  opacity: 0.5;
+  margin-left: 2px;
 }
 
-/* Drop Overlay */
+/* Drop Zone */
 .drop-overlay {
-  position: fixed;
-  top: 56px;
+  position: absolute;
+  top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: rgba(0, 0, 0, 0.5);
+  background-color: rgba(255, 255, 255, 0.9);
   display: flex;
-  align-items: center;
   justify-content: center;
-  z-index: 999;
+  align-items: center;
+  z-index: 2000;
+  border: 2px dashed var(--color-text-tertiary);
+  margin: 16px;
+  border-radius: var(--radius-lg);
+  backdrop-filter: blur(4px);
 }
 
 .drop-message {
-  background: #FFFFFF;
-  padding: 32px 48px;
-  border-radius: 16px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
-  font-size: 18px;
+  gap: var(--space-4);
+  color: var(--color-text-secondary);
+  font-size: var(--text-lg);
   font-weight: 500;
-  color: #1A1A1A;
 }
 
 .drop-icon {
   font-size: 48px;
 }
 
-/* Editor */
+/* Editor Wrapper */
 .editor-wrapper {
   flex: 1;
-  margin-top: 56px;
-  padding: 16px;
-  display: flex;
-  justify-content: center;
+  margin-top: var(--header-height);
+  width: 100%;
+  overflow: visible;
+  background-color: var(--color-bg-primary);
 }
 
 .vditor-container {
-  width: 100%;
-  max-width: 1200px;
-  height: calc(100vh - 56px - 32px);
-  overflow: visible;
+  height: 100%;
 }
 
-/* Vditor overrides */
 :deep(.vditor) {
-  border: 1px solid #E5E5E5;
-  border-radius: 12px;
-  background-color: #FFFFFF;
-  height: 100% !important;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
-  overflow: visible;
+  border: none !important;
+  overflow: visible !important;
 }
 
 :deep(.vditor-toolbar) {
-  background-color: #FFFFFF;
-  border-bottom: 1px solid #E5E5E5;
-  padding: 8px 12px;
+  display: flow-root !important;
+  padding: 0 var(--space-4) !important;
+  border-bottom: 1px solid var(--color-border) !important;
+  background-color: var(--color-bg-primary) !important;
+  overflow: visible !important;
+}
+
+/* The pinned toolbar creates a stacking context (z-index: 1 in Vditor).
+   Raise it above the fixed header so tooltips aren't hidden behind it. */
+:deep(.vditor-toolbar--pin) {
+  z-index: 1100 !important;
 }
 
 :deep(.vditor-toolbar__item) {
-  border-radius: 4px;
-}
-
-:deep(.vditor-toolbar__item:hover) {
-  background-color: #F0F0F0;
+  overflow: visible !important;
 }
 
 :deep(.vditor-content) {
-  background-color: #FFFFFF;
-  height: calc(100% - 40px) !important;
-  border-bottom-left-radius: 12px;
-  border-bottom-right-radius: 12px;
+  font-family: var(--font-primary) !important;
 }
 
-:deep(.vditor-hint),
-:deep(.vditor-panel) {
-  z-index: 2000;
+/* Vditor Toolbar Tooltips - Force all tooltips to display ABOVE (north) */
+/* Keep a consistent gap between buttons and tooltips */
+:deep(.vditor-tooltipped) {
+  position: relative;
+  overflow: visible !important;
 }
 
-:deep(.vditor-sv) {
-  height: 100% !important;
+/* Force all toolbar tooltips to display ABOVE the button */
+:deep(.vditor-toolbar__item .vditor-tooltipped__s::after),
+:deep(.vditor-toolbar__item .vditor-tooltipped__se::after),
+:deep(.vditor-toolbar__item .vditor-tooltipped__sw::after),
+:deep(.vditor-toolbar__item .vditor-tooltipped__n::after),
+:deep(.vditor-toolbar__item .vditor-tooltipped__ne::after),
+:deep(.vditor-toolbar__item .vditor-tooltipped__nw::after) {
+  top: auto !important;
+  bottom: 100% !important;
+  margin-top: 0 !important;
+  margin-bottom: 5px !important;
+  left: 50% !important;
+  right: auto !important;
+  transform: translateX(-50%) !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
 }
 
-:deep(.vditor-reset) {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+:deep(.vditor-toolbar__item .vditor-tooltipped__s::before),
+:deep(.vditor-toolbar__item .vditor-tooltipped__se::before),
+:deep(.vditor-toolbar__item .vditor-tooltipped__sw::before),
+:deep(.vditor-toolbar__item .vditor-tooltipped__n::before),
+:deep(.vditor-toolbar__item .vditor-tooltipped__ne::before),
+:deep(.vditor-toolbar__item .vditor-tooltipped__nw::before) {
+  top: -5px !important;
+  bottom: auto !important;
+  border-top-color: #3b3e43 !important;
+  border-bottom-color: transparent !important;
+  left: 50% !important;
+  right: auto !important;
+  margin-left: -5px !important;
+  margin-right: 0 !important;
 }
 
-/* Mobile */
-@media (max-width: 768px) {
-  .header-content {
-    padding: 0 12px;
-  }
-  
-  .editor-wrapper {
-    padding: 8px;
-  }
-  
-  .vditor-container {
-    height: calc(100vh - 56px - 16px);
-  }
+:deep(.vditor-tooltipped:hover::before),
+:deep(.vditor-tooltipped:hover::after) {
+  display: inline-block !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  text-decoration: none !important;
+  animation: tooltip-appear 0.15s ease-in forwards !important;
+}
 
-  :deep(.vditor) {
-    border-radius: 8px;
-  }
+@keyframes tooltip-appear {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 
-  :deep(.vditor-content) {
-    border-bottom-left-radius: 8px;
-    border-bottom-right-radius: 8px;
-  }
+/* Dialog Footer */
+.dialog-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 </style>

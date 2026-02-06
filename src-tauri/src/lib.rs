@@ -359,9 +359,18 @@ pub fn run() {
             read_text_file
         ])
         .setup(|app| {
-            #[cfg(debug_assertions)]
-            {
-                let window = app.get_webview_window("main").unwrap();
+            // Set window icon
+            if let Some(window) = app.get_webview_window("main") {
+                // Load and decode icon PNG
+                let icon_bytes = include_bytes!("../icons/32x32.png");
+                if let Ok(img) = image::load_from_memory(icon_bytes) {
+                    let rgba = img.to_rgba8();
+                    let (w, h) = rgba.dimensions();
+                    let icon = tauri::image::Image::new_owned(rgba.into_raw(), w, h);
+                    let _ = window.set_icon(icon);
+                }
+
+                #[cfg(debug_assertions)]
                 window.open_devtools();
             }
             Ok(())

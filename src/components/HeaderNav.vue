@@ -137,7 +137,6 @@ const clearContent = async () => {
   background-color: var(--color-bg-primary);
   border-bottom: 1px solid var(--color-border);
   z-index: 100;
-  backdrop-filter: blur(8px);
 }
 
 .header-content {
@@ -159,8 +158,9 @@ const clearContent = async () => {
   align-items: center;
   gap: var(--space-2);
   color: var(--color-text-primary);
-  font-weight: var(--font-weight-semibold);
-  font-size: var(--text-lg);
+  font-weight: 600;
+  font-size: 16px;
+  letter-spacing: -0.01em;
 }
 
 .logo-link:hover {
@@ -168,7 +168,7 @@ const clearContent = async () => {
 }
 
 .logo-icon {
-  font-size: var(--text-xl);
+  font-size: 20px;
 }
 
 .header-actions {
@@ -181,26 +181,28 @@ const clearContent = async () => {
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  padding: var(--space-2) var(--space-3);
+  padding: 8px 12px;
   background-color: transparent;
-  color: var(--color-text-primary);
+  color: var(--color-text-secondary);
   border-radius: var(--radius-md);
-  font-size: var(--text-sm);
-  font-weight: var(--font-weight-medium);
+  font-size: 14px;
+  font-weight: 500;
   transition: all var(--transition-fast);
 }
 
 .action-btn:hover {
-  background-color: var(--color-accent-light);
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
 }
 
 .action-btn.icon-btn {
-  padding: var(--space-2);
-  font-size: var(--text-base);
+  padding: 8px;
+  font-size: 16px;
 }
 
 .dropdown-icon {
-  font-size: var(--text-xs);
-  opacity: 0.6;
+  font-size: 10px;
+  opacity: 0.5;
+  margin-left: 2px;
 }
 </style>
