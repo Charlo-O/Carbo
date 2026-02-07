@@ -291,6 +291,8 @@ const enqueueGitHubUpload = (job: GitHubUploadJob) => {
 // Initialize Vditor editor with local image support
 const initVditor = () => {
   vditor = new Vditor('vditor', {
+    cdn: `${import.meta.env.BASE_URL}vditor`,
+    lang: 'zh_CN',
     width: '100%',
     height: '100%',
     tab: '\t',
