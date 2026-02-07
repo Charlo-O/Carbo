@@ -5,8 +5,9 @@
   "type": "module",
   "description": "Carbo - 基于 Vue 3、Vditor 构建的桌面 Markdown 编辑器",
   "scripts": {
-    "dev": "vite",
-    "build": "vue-tsc --noEmit && vite build",
+    "prepare:vditor": "node scripts/prepare-vditor-assets.mjs",
+    "dev": "npm run prepare:vditor && vite",
+    "build": "npm run prepare:vditor && vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",

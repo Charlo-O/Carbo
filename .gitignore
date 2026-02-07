@@ -8,6 +8,12 @@ dist/
 dist-ssr/
 *.local
 
+# Generated Vditor runtime assets
+public/vditor/
+
+# Generated favicon (copied from src-tauri/icons)
+public/favicon.png
+
 # Tauri build outputs
 src-tauri/target/
 src-tauri/gen/
