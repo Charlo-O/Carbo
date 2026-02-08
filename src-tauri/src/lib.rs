@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
@@ -270,6 +271,56 @@ fn sanitize_file_name(input: &str) -> String {
     }
 }
 
+fn write_export_bytes(
+    dir: &PathBuf,
+    file_name: &str,
+    bytes: &[u8],
+    ts: u128,
+) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let path = dir.join(format!("{}-{}", ts, file_name));
+    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
+#[tauri::command]
+fn save_export_bytes(
+    app: tauri::AppHandle,
+    file_name: String,
+    bytes: Vec<u8>,
+    file_path: Option<String>,
+) -> Result<String, String> {
+    let file_name = sanitize_file_name(&file_name);
+
+    if let Some(file_path) = file_path {
+        let p = std::path::PathBuf::from(&file_path);
+        if let Some(parent) = p.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(&p, &bytes).map_err(|e| e.to_string())?;
+        return Ok(p.to_string_lossy().to_string());
+    }
+
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_millis();
+
+    if let Ok(downloads) = app.path().resolve("Carbo Exports", BaseDirectory::Download) {
+        if let Ok(path) = write_export_bytes(&downloads, &file_name, &bytes, ts) {
+            return Ok(path.to_string_lossy().to_string());
+        }
+    }
+
+    let app_dir = app
+        .path()
+        .resolve("carbo-assets/exports", BaseDirectory::AppData)
+        .map_err(|e| e.to_string())?;
+    let path = write_export_bytes(&app_dir, &file_name, &bytes, ts)?;
+
+    Ok(path.to_string_lossy().to_string())
+}
+
 fn is_allowed_image_extension(path: &std::path::Path) -> bool {
     let ext = path
         .extension()
@@ -350,8 +401,10 @@ fn copy_image_to_app_data(app: tauri::AppHandle, path: String) -> Result<String,
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
+            save_export_bytes,
             save_image_bytes,
             copy_image_to_app_data,
             github_validate_repo,

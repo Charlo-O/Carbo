@@ -104,6 +104,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import Vditor from 'vditor'
 import { defaultContent } from '@config/default'
 import { convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core'
+import type { DialogFilter, SaveDialogOptions } from '@tauri-apps/plugin-dialog'
 
 const router = useRouter()
 
@@ -376,6 +377,174 @@ const devLog = (...args: unknown[]) => {
 
 const isTauriRuntime = () => isTauri()
 
+const pickSavePath = async (options: SaveDialogOptions) => {
+  const { save } = await import('@tauri-apps/plugin-dialog')
+  return await save(options)
+}
+
+const escapeHtml = (input: string) =>
+  input
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+
+const getExportBaseName = (markdown: string) => {
+  const trimmed = markdown.trim()
+  if (!trimmed) return 'carbo-export'
+
+  const firstNonEmpty =
+    trimmed
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .find((l) => l.length > 0) ?? 'carbo-export'
+
+  const heading = /^#{1,6}\s+(.+)$/.exec(firstNonEmpty)
+  const rawName = (heading ? heading[1] : firstNonEmpty).trim()
+  const cleaned = rawName
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  return (cleaned || 'carbo-export').slice(0, 50)
+}
+
+const saveExportBytesWithDialog = async (params: {
+  title: string
+  fileName: string
+  filters: DialogFilter[]
+  bytes: number[]
+}) => {
+  if (!isTauriRuntime()) return null
+
+  const filePath = await pickSavePath({
+    title: params.title,
+    defaultPath: params.fileName,
+    filters: params.filters
+  })
+  if (!filePath) return null
+
+  return await invoke<string>('save_export_bytes', {
+    fileName: params.fileName,
+    filePath,
+    bytes: params.bytes
+  })
+}
+
+const exportMarkdownToFile = async () => {
+  if (!vditor) return
+  const markdown = vditor.getValue()
+  const base = getExportBaseName(markdown)
+  try {
+    const fileName = `${base}.md`
+    const bytes = Array.from(new TextEncoder().encode(markdown))
+    const savedPath = await saveExportBytesWithDialog({
+      title: '导出 Markdown',
+      fileName,
+      filters: [{ name: 'Markdown', extensions: ['md'] }],
+      bytes
+    })
+    if (savedPath) ElMessage.success(`已导出: ${savedPath}`)
+  } catch (e) {
+    ElMessage.error(`导出失败: ${String(e)}`)
+  }
+}
+
+const buildExportHtmlDocument = (title: string, bodyHtml: string) => {
+  const safeTitle = escapeHtml(title)
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${safeTitle}</title>
+    <style>
+      :root { color-scheme: light; }
+      body { margin: 0; background: #fff; color: #111; }
+      main { max-width: 920px; margin: 0 auto; padding: 32px 20px; font: 16px/1.7 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans', Arial, sans-serif; }
+      h1, h2, h3 { line-height: 1.25; }
+      img { max-width: 100%; height: auto; }
+      pre { background: #f6f8fa; padding: 12px 14px; border-radius: 10px; overflow: auto; }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; }
+      blockquote { margin: 0; padding: 0 16px; border-left: 4px solid #e5e7eb; color: #374151; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border: 1px solid #e5e7eb; padding: 8px 10px; }
+      a { color: #2563eb; }
+      hr { border: 0; border-top: 1px solid #e5e7eb; margin: 24px 0; }
+    </style>
+  </head>
+  <body>
+    <main>
+      ${bodyHtml}
+    </main>
+  </body>
+</html>`
+}
+
+const exportHtmlToFile = async () => {
+  if (!vditor) return
+  const markdown = vditor.getValue()
+  const base = getExportBaseName(markdown)
+  try {
+    const bodyHtml = vditor.getHTML()
+    const html = buildExportHtmlDocument(base, bodyHtml)
+    const fileName = `${base}.html`
+    const bytes = Array.from(new TextEncoder().encode(html))
+    const savedPath = await saveExportBytesWithDialog({
+      title: '导出 HTML',
+      fileName,
+      filters: [{ name: 'HTML', extensions: ['html'] }],
+      bytes
+    })
+    if (savedPath) ElMessage.success(`已导出: ${savedPath}`)
+  } catch (e) {
+    ElMessage.error(`导出失败: ${String(e)}`)
+  }
+}
+
+const exportPdfViaRoute = () => {
+  // Reuse our dedicated export page which supports Tauri file save.
+  router.push({ path: '/export/pdf', query: { auto: '1' } })
+}
+
+const isVditorExportPanel = (panel: Element) =>
+  Boolean(
+    panel.querySelector('button[data-type="markdown"]') &&
+      panel.querySelector('button[data-type="pdf"]') &&
+      panel.querySelector('button[data-type="html"]')
+  )
+
+const onVditorExportClickCapture = (event: Event) => {
+  if (!isTauriRuntime()) return
+  if (!vditor) return
+
+  const target = event.target
+  if (!(target instanceof HTMLElement)) return
+  if (target.tagName !== 'BUTTON') return
+
+  const exportType = target.getAttribute('data-type')
+  if (exportType !== 'markdown' && exportType !== 'pdf' && exportType !== 'html') return
+
+  const panel = target.closest('.vditor-hint')
+  if (!panel) return
+  if (!isVditorExportPanel(panel)) return
+
+  event.preventDefault()
+  event.stopPropagation()
+  ;(panel as HTMLElement).style.display = 'none'
+
+  if (exportType === 'markdown') {
+    void exportMarkdownToFile()
+    return
+  }
+  if (exportType === 'html') {
+    void exportHtmlToFile()
+    return
+  }
+  exportPdfViaRoute()
+}
+
 const toFileUrl = (filePath: string) => {
   const path = filePath.replace(/\\/g, '/')
   if (/^[a-zA-Z]:\//.test(path)) return `file:///${encodeURI(path)}`
@@ -471,7 +640,7 @@ const saveImageToAppData = async (file: File) => {
   const bytes = Array.from(new Uint8Array(buffer))
 
   const result = await invoke<string>('save_image_bytes', {
-    file_name: file.name,
+    fileName: file.name,
     bytes
   })
   return result
@@ -697,6 +866,10 @@ onMounted(() => {
   loadImageBed()
   initVditor()
 
+  // In Tauri, Vditor's built-in export relies on browser download/print.
+  // Intercept and export via backend file save.
+  document.addEventListener('click', onVditorExportClickCapture, true)
+
   // Web fallback: use HTML5 drag/drop to read File objects.
   if (!isTauriRuntime()) {
     // Capture file drops globally so dropping works even if inner components stop propagation.
@@ -711,6 +884,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('dragover', onWindowDragOverCapture, true)
   window.removeEventListener('drop', onWindowDropCapture, true)
+  document.removeEventListener('click', onVditorExportClickCapture, true)
   tauriUnlistenFileDrop?.()
   vditor?.destroy()
 })

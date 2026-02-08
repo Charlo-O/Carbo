@@ -8,6 +8,20 @@ import App from './App.vue'
 import { routes } from './router'
 import './assets/styles/main.css'
 
+if (import.meta.env.DEV && 'serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations().then((regs) => {
+        regs.forEach((reg) => reg.unregister())
+    })
+
+    if ('caches' in window) {
+        caches.keys().then((keys) => {
+            keys.forEach((key) => {
+                void caches.delete(key)
+            })
+        })
+    }
+}
+
 // Create router
 const router = createRouter({
     history: createWebHistory(),
