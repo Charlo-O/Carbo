@@ -1,6 +1,6 @@
 {
   "name": "carbo-markdown-editor",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "description": "Carbo - 基于 Vue 3、Vditor 构建的桌面 Markdown 编辑器",

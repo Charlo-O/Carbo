@@ -6,49 +6,6 @@
     @dragleave="onDragLeave"
     @drop="onDrop"
   >
-    <!-- Header Navigation -->
-    <header class="header-nav">
-      <div class="header-content">
-        <div class="header-logo">
-          <router-link to="/" class="logo-link">
-            <img src="/src-tauri/icons/32x32.png" class="logo-img" alt="Carbo logo" />
-            <span class="logo-text">Carbo</span>
-          </router-link>
-        </div>
-        <div class="header-actions">
-          <el-dropdown trigger="click" @command="handleExport" popper-class="custom-dropdown">
-            <button class="action-btn">
-              <span>Export</span>
-              <span class="dropdown-icon">▾</span>
-            </button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="image">Image</el-dropdown-item>
-                <el-dropdown-item command="pdf">PDF</el-dropdown-item>
-                <el-dropdown-item command="ppt">PPT Preview</el-dropdown-item>
-                <el-dropdown-item command="html">Copy HTML</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-          <el-dropdown trigger="click" @command="handleSetting" popper-class="custom-dropdown">
-            <button class="action-btn icon-btn">
-              <svg class="settings-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="3"></circle>
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-              </svg>
-            </button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="import">Import...</el-dropdown-item>
-                <el-dropdown-item command="clear">Clear All</el-dropdown-item>
-                <el-dropdown-item command="imagebed">Image Host</el-dropdown-item>
-                <el-dropdown-item divided command="about">About</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-        </div>
-      </div>
-    </header>
 
     <!-- Drop Zone Overlay -->
     <div v-if="isDragging" class="drop-overlay">
@@ -62,6 +19,28 @@
     <div class="editor-wrapper">
       <div id="vditor" class="vditor-container" />
     </div>
+
+    <!-- Settings button teleported into Vditor counter area -->
+    <Teleport to="#settings-anchor" v-if="settingsAnchorReady">
+      <el-dropdown trigger="click" @command="handleSetting" popper-class="custom-dropdown" placement="top-start">
+        <button class="bottom-settings-btn">
+          <svg class="settings-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="export-image">导出图片</el-dropdown-item>
+            <el-dropdown-item command="export-ppt">PPT 预览</el-dropdown-item>
+            <el-dropdown-item divided command="import">导入文件...</el-dropdown-item>
+            <el-dropdown-item command="clear">清空内容</el-dropdown-item>
+            <el-dropdown-item command="imagebed">图床设置</el-dropdown-item>
+            <el-dropdown-item divided command="about">关于</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+    </Teleport>
 
     <el-dialog v-model="isImageBedDialogOpen" title="Image Bed Settings" width="480px" class="custom-dialog">
       <el-form :model="imageBedForm" label-position="top">
@@ -112,6 +91,8 @@ const router = useRouter()
 const isLoading = ref(true)
 const isDragging = ref(false)
 let vditor: Vditor | null = null
+const wordCount = ref(0)
+const settingsAnchorReady = ref(false)
 
 // Local storage key
 const STORAGE_KEY = 'carbo-markdown-content'
@@ -351,9 +332,23 @@ const initVditor = () => {
       vditor?.setValue(content)
       vditor?.focus()
       isLoading.value = false
+      wordCount.value = content.length
+
+      // Create mount point for settings button next to Vditor counter
+      const counter = document.querySelector('.vditor-counter')
+      if (counter && counter.parentElement && !document.getElementById('settings-anchor')) {
+        const anchor = document.createElement('div')
+        anchor.id = 'settings-anchor'
+        anchor.style.display = 'inline-flex'
+        anchor.style.alignItems = 'center'
+        anchor.style.marginRight = '4px'
+        counter.parentElement.insertBefore(anchor, counter)
+        settingsAnchorReady.value = true
+      }
     },
     input: (value: string) => {
       localStorage.setItem(STORAGE_KEY, value)
+      wordCount.value = value.length
     }
   })
 }
@@ -783,31 +778,15 @@ const setupTauriFileDrop = async () => {
   }
 }
 
-// Export handlers
-const handleExport = (command: string) => {
-  switch (command) {
-    case 'image':
-      router.push('/export/image')
-      break
-    case 'pdf':
-      router.push('/export/pdf')
-      break
-    case 'ppt':
-      router.push('/export/ppt')
-      break
-    case 'html':
-      const content = localStorage.getItem(STORAGE_KEY) || ''
-      if (content) {
-        navigator.clipboard.writeText(content)
-        ElMessage.success('HTML copied to clipboard')
-      }
-      break
-  }
-}
-
-// Settings handlers
+// Settings & export handlers
 const handleSetting = async (command: string) => {
   switch (command) {
+    case 'export-image':
+      router.push('/export/image')
+      break
+    case 'export-ppt':
+      router.push('/export/ppt')
+      break
     case 'import':
       importFile()
       break
@@ -816,13 +795,14 @@ const handleSetting = async (command: string) => {
       break
     case 'clear':
       try {
-        await ElMessageBox.confirm('Are you sure you want to clear all content?', 'Warning', {
-          confirmButtonText: 'Yes, clear it',
-          cancelButtonText: 'Cancel',
+        await ElMessageBox.confirm('确定要清空所有内容吗？', '提示', {
+          confirmButtonText: '确定',
+          cancelButtonText: '取消',
           type: 'warning'
         })
         localStorage.removeItem(STORAGE_KEY)
         vditor?.setValue('')
+        wordCount.value = 0
       } catch { }
       break
     case 'about':
@@ -990,6 +970,32 @@ onBeforeUnmount(() => {
   margin-left: 2px;
 }
 
+/* Bottom settings button - injected into Vditor counter area */
+.bottom-settings-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--color-text-tertiary);
+  transition: all var(--transition-fast);
+}
+
+.bottom-settings-btn:hover {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.bottom-settings-btn .settings-icon {
+  width: 14px;
+  height: 14px;
+}
+
 /* Drop Zone */
 .drop-overlay {
   position: absolute;
@@ -1024,8 +1030,8 @@ onBeforeUnmount(() => {
 
 /* Editor Wrapper */
 .editor-wrapper {
+  position: relative;
   flex: 1;
-  margin-top: var(--header-height);
   width: 100%;
   overflow: visible;
   background-color: var(--color-bg-primary);
@@ -1122,5 +1128,41 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+</style>
+
+<style>
+/* Unscoped: styles for teleported settings button in Vditor counter area */
+#settings-anchor {
+  display: inline-flex;
+  align-items: center;
+  float: right;
+  margin-right: 2px;
+  height: 100%;
+}
+
+#settings-anchor .bottom-settings-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #959ba5;
+  transition: all 0.15s ease;
+}
+
+#settings-anchor .bottom-settings-btn:hover {
+  background-color: rgba(0, 0, 0, 0.06);
+  color: #1a1a1a;
+}
+
+#settings-anchor .bottom-settings-btn .settings-icon {
+  width: 14px;
+  height: 14px;
 }
 </style>

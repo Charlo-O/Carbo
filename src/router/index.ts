@@ -5,7 +5,7 @@ export const routes: RouteRecordRaw[] = [
         path: '/',
         name: 'Home',
         component: () => import('@pages/Main.vue'),
-        meta: { title: 'Arya - Markdown 编辑器' }
+        meta: { title: 'Carbo' }
     },
     {
         path: '/about',
