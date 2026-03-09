@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.5.1 - 2026-03-09
+
+- Fix: repair GitHub Release workflow by pinning `tauri-apps/tauri-action@v0.6.0`.
+- Release: retrigger desktop packaging for Windows and unsigned macOS bundles.
+
 ## 1.5.0 - 2026-03-09
 
 - Fix: make file drag-and-drop work on Tauri v2 and preserve real filesystem paths by switching to `getCurrentWebview().onDragDropEvent`.
