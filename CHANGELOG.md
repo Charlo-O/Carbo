@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.5.0 - 2026-03-09
+
 - Fix: make file drag-and-drop work on Tauri v2 and preserve real filesystem paths by switching to `getCurrentWebview().onDragDropEvent`.
 - Security: add Tauri v2 capability file (`src-tauri/capabilities/default.json`) to allow required core event listening permissions.
 - Fix: read dropped markdown files via a Rust command (`read_text_file`) instead of `fetch(convertFileSrc(...))` to avoid asset protocol scope limitations.

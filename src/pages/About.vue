@@ -4,7 +4,7 @@
       <div class="about-header">
         <img src="/src-tauri/icons/128x128.png" class="about-icon" alt="Carbo logo" />
         <h1>Carbo Markdown Editor</h1>
-        <p class="version">v1.0.0</p>
+        <p class="version">v1.5.0</p>
       </div>
 
       <div class="about-section">

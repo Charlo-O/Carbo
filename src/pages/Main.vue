@@ -77,13 +77,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import Vditor from 'vditor'
 import { defaultContent } from '@config/default'
 import { convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core'
 import type { DialogFilter, SaveDialogOptions } from '@tauri-apps/plugin-dialog'
+
+import { consumePendingOpenPaths, pendingOpenPaths } from '@utils/openPaths'
 
 const router = useRouter()
 
@@ -93,6 +95,11 @@ const isDragging = ref(false)
 let vditor: Vditor | null = null
 const wordCount = ref(0)
 const settingsAnchorReady = ref(false)
+
+let vditorReadyResolve: (() => void) | null = null
+const vditorReady = new Promise<void>((resolve) => {
+  vditorReadyResolve = resolve
+})
 
 // Local storage key
 const STORAGE_KEY = 'carbo-markdown-content'
@@ -270,6 +277,35 @@ const enqueueGitHubUpload = (job: GitHubUploadJob) => {
   void runGitHubUploadQueue()
 }
 
+const applyEditorContent = (content: string) => {
+  if (!vditor) return
+  vditor.setValue(content)
+  localStorage.setItem(STORAGE_KEY, content)
+}
+
+const openPendingPaths = async (paths: string[]) => {
+  if (paths.length === 0) {
+    consumePendingOpenPaths()
+    return
+  }
+
+  await vditorReady
+  try {
+    await handleDroppedPaths(paths)
+  } finally {
+    consumePendingOpenPaths()
+  }
+}
+
+watch(
+  pendingOpenPaths,
+  (paths) => {
+    if (!paths || paths.length === 0) return
+    void openPendingPaths(paths)
+  },
+  { immediate: true }
+)
+
 // Initialize Vditor editor with local image support
 const initVditor = () => {
   vditor = new Vditor('vditor', {
@@ -295,7 +331,7 @@ const initVditor = () => {
       position: 'right'
     },
     cache: {
-      enable: true,
+      enable: false,
       id: 'carbo-editor'
     },
     upload: {
@@ -345,6 +381,9 @@ const initVditor = () => {
         counter.parentElement.insertBefore(anchor, counter)
         settingsAnchorReady.value = true
       }
+
+      vditorReadyResolve?.()
+      vditorReadyResolve = null
     },
     input: (value: string) => {
       localStorage.setItem(STORAGE_KEY, value)
@@ -601,8 +640,7 @@ const openMarkdownFromPath = async (filePath: string) => {
         return await res.text()
       })()
 
-  vditor.setValue(content)
-  localStorage.setItem(STORAGE_KEY, content)
+  applyEditorContent(content)
   ElMessage.success(`Opened: ${basename(filePath)}`)
 }
 
@@ -674,8 +712,7 @@ const handleDroppedFiles = async (fileList: FileList) => {
   try {
     if (isMarkdownLike(openTarget)) {
       const content = await readFileAsText(openTarget)
-      vditor.setValue(content)
-      localStorage.setItem(STORAGE_KEY, content)
+      applyEditorContent(content)
       ElMessage.success(`Opened: ${openTarget.name}`)
       return
     }
@@ -830,8 +867,7 @@ const importFile = () => {
         const reader = new FileReader()
         reader.onload = (event) => {
           const content = event.target?.result as string
-          vditor?.setValue(content)
-          localStorage.setItem(STORAGE_KEY, content)
+          applyEditorContent(content)
         }
         reader.readAsText(file)
       }

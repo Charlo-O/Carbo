@@ -1,12 +1,51 @@
 use std::path::PathBuf;
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
 use image::GenericImageView;
 use serde::{Deserialize, Serialize};
-use tauri::{path::BaseDirectory, Manager};
+use tauri::{path::BaseDirectory, Emitter, Manager};
 
 const GITHUB_API_VERSION: &str = "2022-11-28";
+
+struct StartupOpenPaths(Mutex<Vec<String>>);
+
+#[derive(Serialize, Clone)]
+struct OpenPathsPayload {
+    paths: Vec<String>,
+}
+
+fn extract_open_paths_from_args<I>(args: I) -> Vec<String>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut out: Vec<String> = Vec::new();
+
+    for arg in args {
+        let trimmed = arg.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // Ignore flags. The OS file association passes raw file paths, not flags.
+        if trimmed.starts_with('-') {
+            continue;
+        }
+
+        let p = std::path::Path::new(trimmed);
+        if !p.is_file() {
+            continue;
+        }
+        if !is_allowed_text_extension(p) {
+            continue;
+        }
+
+        out.push(trimmed.to_string());
+    }
+
+    out
+}
 
 fn parse_github_repo(repo: &str) -> Result<(String, String), String> {
     let trimmed = repo.trim();
@@ -257,6 +296,17 @@ fn read_text_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(p).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn consume_startup_open_paths(
+    state: tauri::State<'_, StartupOpenPaths>,
+) -> Result<Vec<String>, String> {
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|_| "startup open paths lock poisoned".to_string())?;
+    Ok(guard.drain(..).collect())
+}
+
 fn sanitize_file_name(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     for ch in input.chars() {
@@ -400,16 +450,31 @@ fn copy_image_to_app_data(app: tauri::AppHandle, path: String) -> Result<String,
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let startup_open_paths = extract_open_paths_from_args(std::env::args().skip(1));
+
     tauri::Builder::default()
+        .manage(StartupOpenPaths(Mutex::new(startup_open_paths)))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            let paths = extract_open_paths_from_args(argv);
+            if paths.is_empty() {
+                return;
+            }
+
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_focus();
+                let _ = window.emit("carbo-open-paths", OpenPathsPayload { paths });
+            }
+        }))
         .invoke_handler(tauri::generate_handler![
             save_export_bytes,
             save_image_bytes,
             copy_image_to_app_data,
             github_validate_repo,
             github_upload_image_from_path,
-            read_text_file
+            read_text_file,
+            consume_startup_open_paths
         ])
         .setup(|app| {
             // Set window icon
