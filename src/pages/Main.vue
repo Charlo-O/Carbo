@@ -277,10 +277,14 @@ const enqueueGitHubUpload = (job: GitHubUploadJob) => {
   void runGitHubUploadQueue()
 }
 
+// Track the content snapshot at the time of last open/save/init to detect changes on close
+let lastSavedContent = ''
+
 const applyEditorContent = (content: string) => {
   if (!vditor) return
   vditor.setValue(content)
   localStorage.setItem(STORAGE_KEY, content)
+  lastSavedContent = content
 }
 
 const openPendingPaths = async (paths: string[]) => {
@@ -366,6 +370,7 @@ const initVditor = () => {
     after: () => {
       const content = localStorage.getItem(STORAGE_KEY) || defaultContent
       vditor?.setValue(content)
+      lastSavedContent = content
       vditor?.focus()
       isLoading.value = false
       wordCount.value = content.length
@@ -631,6 +636,7 @@ const getDroppedFilePath = (file: File) => {
 
 const openMarkdownFromPath = async (filePath: string) => {
   if (!vditor) return
+
   const content = isTauriRuntime()
     ? await invoke<string>('read_text_file', { path: filePath })
     : await (async () => {
@@ -839,6 +845,7 @@ const handleSetting = async (command: string) => {
         })
         localStorage.removeItem(STORAGE_KEY)
         vditor?.setValue('')
+        lastSavedContent = ''
         wordCount.value = 0
       } catch { }
       break
@@ -895,13 +902,63 @@ onMounted(() => {
 
   // Tauri: native drag/drop yields real filesystem paths.
   void setupTauriFileDrop()
+
+  // Intercept window close to prompt save if content changed
+  if (isTauriRuntime()) {
+    void setupTauriCloseGuard()
+  } else {
+    window.addEventListener('beforeunload', onBeforeUnload)
+  }
 })
 
+// Web: warn before closing if content changed
+const onBeforeUnload = (e: BeforeUnloadEvent) => {
+  if (!vditor) return
+  if (vditor.getValue() !== lastSavedContent) {
+    e.preventDefault()
+  }
+}
+
+// Tauri: intercept close, show save dialog
+let tauriUnlistenClose: (() => void) | null = null
+
+const setupTauriCloseGuard = async () => {
+  const { getCurrentWindow } = await import('@tauri-apps/api/window')
+  const appWindow = getCurrentWindow()
+
+  tauriUnlistenClose = await appWindow.onCloseRequested(async (event) => {
+    if (!vditor) return
+    if (vditor.getValue() === lastSavedContent) return
+
+    event.preventDefault()
+
+    try {
+      await ElMessageBox.confirm('当前内容已修改，是否保存？', '提示', {
+        confirmButtonText: '保存',
+        cancelButtonText: '不保存',
+        distinguishCancelAndClose: true,
+        type: 'warning'
+      })
+      // User clicked "保存"
+      await exportMarkdownToFile()
+      await appWindow.destroy()
+    } catch (action) {
+      if (action === 'cancel') {
+        // User clicked "不保存" — close without saving
+        await appWindow.destroy()
+      }
+      // User clicked close (X) on the dialog — stay open
+    }
+  })
+}
+
 onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', onBeforeUnload)
   window.removeEventListener('dragover', onWindowDragOverCapture, true)
   window.removeEventListener('drop', onWindowDropCapture, true)
   document.removeEventListener('click', onVditorExportClickCapture, true)
   tauriUnlistenFileDrop?.()
+  tauriUnlistenClose?.()
   vditor?.destroy()
 })
 </script>
