@@ -77,7 +77,16 @@
         <span>{{ saveStatusLabel }}</span>
         <span>字数 {{ wordCount }}</span>
         <span>{{ currentFilePath ? '自动保存到当前文件' : '未命名文档：内容先保存为草稿' }}</span>
-        <span>快捷键：⌘/Ctrl+N O S Shift+S</span>
+        <span>快捷键：⌘/Ctrl+N O S Shift+S / F / H / P</span>
+      </div>
+
+      <div v-if="searchPanelOpen" class="search-panel">
+        <input v-model="searchQuery" class="search-input" placeholder="搜索文本" @keydown.enter.prevent="runSearch" />
+        <input v-model="replaceQuery" class="search-input" placeholder="替换为（可选）" @keydown.enter.prevent="replaceNext" />
+        <button class="toolbar-btn" @click="runSearch">查找</button>
+        <button class="toolbar-btn" @click="replaceNext">替换下一个</button>
+        <button class="toolbar-btn" @click="replaceAll">全部替换</button>
+        <button class="toolbar-btn" @click="searchPanelOpen = false">关闭</button>
       </div>
 
       <div class="editor-wrapper">
@@ -113,6 +122,9 @@ const openedFolderPath = ref('')
 const recentFiles = ref<RecentItem[]>(loadRecentFiles())
 const recentProjects = ref<RecentItem[]>(loadRecentProjects())
 const folderEntries = ref<FolderEntry[]>([])
+const searchPanelOpen = ref(false)
+const searchQuery = ref('')
+const replaceQuery = ref('')
 let vditor: Vditor | null = null
 let autosaveTimer: number | null = null
 let suspendInput = false
@@ -327,6 +339,47 @@ const exportHtml = async () => {
   if (savedPath) ElMessage.success(`已导出: ${savedPath}`)
 }
 
+const runSearch = () => {
+  if (!vditor) return
+  const query = searchQuery.value
+  if (!query) return
+  const value = vditor.getValue()
+  if (!value.includes(query)) {
+    ElMessage.warning('没有找到匹配内容')
+    return
+  }
+  vditor.focus()
+  ElMessage.success(`已定位搜索词：${query}`)
+}
+
+const replaceNext = () => {
+  if (!vditor || !searchQuery.value) return
+  const value = vditor.getValue()
+  const index = value.indexOf(searchQuery.value)
+  if (index < 0) {
+    ElMessage.warning('没有找到可替换内容')
+    return
+  }
+  const updated = `${value.slice(0, index)}${replaceQuery.value}${value.slice(index + searchQuery.value.length)}`
+  applyEditorContent(updated)
+  saveDraft(updated)
+  scheduleAutosave()
+}
+
+const replaceAll = () => {
+  if (!vditor || !searchQuery.value) return
+  const value = vditor.getValue()
+  if (!value.includes(searchQuery.value)) {
+    ElMessage.warning('没有找到可替换内容')
+    return
+  }
+  const updated = value.split(searchQuery.value).join(replaceQuery.value)
+  applyEditorContent(updated)
+  saveDraft(updated)
+  scheduleAutosave()
+  ElMessage.success('已全部替换')
+}
+
 const handleCommand = async (command: string) => {
   switch (command) {
     case 'export-pdf':
@@ -425,6 +478,18 @@ const handleKeydown = (event: KeyboardEvent) => {
   if (event.key.toLowerCase() === 'n') {
     event.preventDefault()
     createNewDocument()
+  }
+  if (event.key.toLowerCase() === 'f') {
+    event.preventDefault()
+    searchPanelOpen.value = true
+  }
+  if (event.key.toLowerCase() === 'h' && event.shiftKey) {
+    event.preventDefault()
+    searchPanelOpen.value = true
+  }
+  if (event.key.toLowerCase() === 'p') {
+    event.preventDefault()
+    router.push({ path: '/export/pdf', query: { auto: '1', name: currentDocumentName.value } })
   }
 }
 
@@ -707,6 +772,22 @@ onBeforeUnmount(() => {
   color: #e5e7eb !important;
 }
 
+.search-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto auto auto;
+  gap: 10px;
+  padding: 0 28px 14px;
+}
+
+.search-input {
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 10px 12px;
+  color: inherit;
+}
+
 @media (max-width: 960px) {
   .workbench {
     grid-template-columns: 1fr;
@@ -714,6 +795,10 @@ onBeforeUnmount(() => {
 
   .sidebar {
     display: none;
+  }
+
+  .search-panel {
+    grid-template-columns: 1fr;
   }
 }
 </style>

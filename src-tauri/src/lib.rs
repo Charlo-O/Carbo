@@ -360,7 +360,18 @@ fn copy_image_for_document(source_path: String, document_path: String) -> Result
         .duration_since(UNIX_EPOCH)
         .map_err(|e| e.to_string())?
         .as_millis();
-    let filename = format!("{}-{}.{}", ts, sanitize_git_path_component(doc_stem), extension);
+    let source_stem = src
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(doc_stem);
+    let filename = format!(
+        "{}-{}-{}.{}",
+        ts,
+        sanitize_git_path_component(doc_stem),
+        sanitize_git_path_component(source_stem),
+        extension
+    );
     let destination = assets_dir.join(filename);
     std::fs::copy(&src, &destination).map_err(|e| e.to_string())?;
     Ok(destination.to_string_lossy().to_string())
@@ -379,6 +390,11 @@ fn save_image_for_document(file_name: String, bytes: Vec<u8>, document_path: Str
     std::fs::create_dir_all(&assets_dir).map_err(|e| e.to_string())?;
 
     let source_name = sanitize_file_name(&file_name);
+    let source_stem = std::path::Path::new(&source_name)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(doc_stem);
     let extension = std::path::Path::new(&source_name)
         .extension()
         .and_then(|s| s.to_str())
@@ -388,7 +404,13 @@ fn save_image_for_document(file_name: String, bytes: Vec<u8>, document_path: Str
         .duration_since(UNIX_EPOCH)
         .map_err(|e| e.to_string())?
         .as_millis();
-    let filename = format!("{}-{}.{}", ts, sanitize_git_path_component(doc_stem), extension);
+    let filename = format!(
+        "{}-{}-{}.{}",
+        ts,
+        sanitize_git_path_component(doc_stem),
+        sanitize_git_path_component(source_stem),
+        extension
+    );
     let destination = assets_dir.join(filename);
     std::fs::write(&destination, bytes).map_err(|e| e.to_string())?;
     Ok(destination.to_string_lossy().to_string())
@@ -421,22 +443,33 @@ fn write_export_bytes(
 }
 
 fn collect_text_entries(dir: &std::path::Path) -> Result<Vec<FileTreeEntry>, String> {
-    let mut entries: Vec<FileTreeEntry> = std::fs::read_dir(dir)
-        .map_err(|e| e.to_string())?
-        .filter_map(|entry| entry.ok())
-        .filter_map(|entry| {
+    fn visit(base: &std::path::Path, dir: &std::path::Path, out: &mut Vec<FileTreeEntry>) -> Result<(), String> {
+        for entry in std::fs::read_dir(dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
             let path = entry.path();
-            if !path.is_file() || !is_allowed_text_extension(&path) {
-                return None;
+            if path.is_dir() {
+                visit(base, &path, out)?;
+                continue;
             }
-            let name = path.file_name()?.to_str()?.to_string();
-            Some(FileTreeEntry {
+            if !path.is_file() || !is_allowed_text_extension(&path) {
+                continue;
+            }
+            let relative = path
+                .strip_prefix(base)
+                .ok()
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .to_string();
+            out.push(FileTreeEntry {
                 path: path.to_string_lossy().to_string(),
-                name,
-            })
-        })
-        .collect();
+                name: relative,
+            });
+        }
+        Ok(())
+    }
 
+    let mut entries = Vec::new();
+    visit(dir, dir, &mut entries)?;
     entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     Ok(entries)
 }
