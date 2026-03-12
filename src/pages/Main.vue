@@ -1,853 +1,351 @@
 <template>
-  <div 
-    class="main-page" 
-    v-loading="isLoading"
-    @dragover="onDragOver"
-    @dragleave="onDragLeave"
-    @drop="onDrop"
-  >
-
-    <!-- Drop Zone Overlay -->
-    <div v-if="isDragging" class="drop-overlay">
-      <div class="drop-message">
-        <span class="drop-icon">📄</span>
-        <span>Drop to open</span>
+  <div class="workbench" :class="[`theme-${theme}`, widthClass, { 'sidebar-collapsed': !sidebarOpen, 'focus-mode': focusMode }]">
+    <aside class="sidebar">
+      <div class="sidebar-top">
+        <button class="ghost-btn" @click="sidebarOpen = !sidebarOpen">{{ sidebarOpen ? '收起' : '展开' }}</button>
+        <button class="ghost-btn" @click="openFolder">打开文件夹</button>
       </div>
-    </div>
 
-    <!-- Editor -->
-    <div class="editor-wrapper">
-      <div id="vditor" class="vditor-container" />
-    </div>
+      <template v-if="sidebarOpen">
+        <section class="sidebar-section">
+          <div class="section-title">最近文件</div>
+          <button v-for="item in recentFiles" :key="item.path" class="sidebar-item" @click="openFilePath(item.path)">
+            <strong>{{ item.name }}</strong>
+            <span>{{ truncateMiddle(item.parent, 32) }}</span>
+          </button>
+          <div v-if="recentFiles.length === 0" class="empty-text">还没有最近文件</div>
+        </section>
 
-    <!-- Settings button teleported into Vditor counter area -->
-    <Teleport to="#settings-anchor" v-if="settingsAnchorReady">
-      <el-dropdown trigger="click" @command="handleSetting" popper-class="custom-dropdown" placement="top-start">
-        <button class="bottom-settings-btn">
-          <svg class="settings-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="3"></circle>
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-          </svg>
-        </button>
-        <template #dropdown>
-          <el-dropdown-menu>
-            <el-dropdown-item command="export-image">导出图片</el-dropdown-item>
-            <el-dropdown-item command="export-ppt">PPT 预览</el-dropdown-item>
-            <el-dropdown-item divided command="import">导入文件...</el-dropdown-item>
-            <el-dropdown-item command="clear">清空内容</el-dropdown-item>
-            <el-dropdown-item command="imagebed">图床设置</el-dropdown-item>
-            <el-dropdown-item divided command="about">关于</el-dropdown-item>
-          </el-dropdown-menu>
-        </template>
-      </el-dropdown>
-    </Teleport>
+        <section class="sidebar-section">
+          <div class="section-title">最近项目</div>
+          <button v-for="item in recentProjects" :key="item.path" class="sidebar-item" @click="openFolderPath(item.path)">
+            <strong>{{ item.name }}</strong>
+            <span>{{ truncateMiddle(item.path, 32) }}</span>
+          </button>
+          <div v-if="recentProjects.length === 0" class="empty-text">还没有最近项目</div>
+        </section>
 
-    <el-dialog v-model="isImageBedDialogOpen" title="Image Bed Settings" width="480px" class="custom-dialog">
-      <el-form :model="imageBedForm" label-position="top">
-        <el-form-item label="Enable GitHub Upload">
-          <el-switch v-model="imageBedForm.enabled" />
-        </el-form-item>
-        <template v-if="imageBedForm.enabled">
-          <el-form-item label="Repository (owner/repo)">
-            <el-input v-model="imageBedForm.repo" placeholder="e.g. username/assets" />
-          </el-form-item>
-          <el-form-item label="Branch">
-            <el-input v-model="imageBedForm.branch" placeholder="main" />
-          </el-form-item>
-          <el-form-item label="Path Prefix">
-            <el-input v-model="imageBedForm.pathPrefix" placeholder="images" />
-          </el-form-item>
-          <el-form-item label="Personal Access Token">
-            <el-input v-model="imageBedForm.token" placeholder="ghp_..." type="password" show-password />
-          </el-form-item>
-        </template>
-      </el-form>
-
-      <template #footer>
-        <div class="dialog-footer">
-          <el-button @click="validateImageBed" :loading="isValidatingImageBed" link>Test Connection</el-button>
-          <div>
-            <el-button @click="isImageBedDialogOpen = false">Cancel</el-button>
-            <el-button type="primary" :loading="isSavingImageBed" @click="saveImageBed">Save</el-button>
-          </div>
-        </div>
+        <section class="sidebar-section">
+          <div class="section-title">当前文件夹</div>
+          <div v-if="openedFolderPath" class="folder-path">{{ truncateMiddle(openedFolderPath, 40) }}</div>
+          <button v-for="entry in folderEntries" :key="entry.path" class="sidebar-item" :class="{ active: entry.path === currentFilePath }" @click="openFilePath(entry.path)">
+            <strong>{{ entry.name }}</strong>
+            <span>{{ entry.path === currentFilePath ? '当前文档' : '点击打开' }}</span>
+          </button>
+          <div v-if="folderEntries.length === 0" class="empty-text">打开一个文件夹后，这里会显示 .md / .txt 文件。</div>
+        </section>
       </template>
-    </el-dialog>
+    </aside>
+
+    <main class="editor-shell" v-loading="isLoading" @dragover="onDragOver" @dragleave="onDragLeave" @drop="onDrop">
+      <div v-if="isDragging" class="drop-overlay">
+        <div class="drop-card">拖拽文件到这里打开或插入</div>
+      </div>
+
+      <header class="topbar">
+        <div>
+          <div class="doc-title-row">
+            <h1>{{ currentDocumentName }}</h1>
+            <span class="dirty-dot" :class="{ visible: isDirty }"></span>
+          </div>
+          <p class="doc-meta">{{ currentDocumentMeta }}</p>
+        </div>
+
+        <div class="toolbar-actions">
+          <button class="toolbar-btn" @click="createNewDocument">新建</button>
+          <button class="toolbar-btn" @click="openFile">打开</button>
+          <button class="toolbar-btn" @click="saveDocument" :disabled="saveStatus === 'saving'">保存</button>
+          <button class="toolbar-btn" @click="saveAsDocument">另存为</button>
+          <el-dropdown trigger="click" @command="handleCommand">
+            <button class="toolbar-btn primary">更多 ▾</button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="export-pdf">导出 PDF</el-dropdown-item>
+                <el-dropdown-item command="export-html">导出 HTML</el-dropdown-item>
+                <el-dropdown-item command="export-md">导出 Markdown</el-dropdown-item>
+                <el-dropdown-item divided command="toggle-theme">切换主题</el-dropdown-item>
+                <el-dropdown-item command="toggle-focus">专注模式</el-dropdown-item>
+                <el-dropdown-item command="toggle-width">阅读宽度</el-dropdown-item>
+                <el-dropdown-item command="about">关于</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </div>
+      </header>
+
+      <div class="statusbar">
+        <span>{{ saveStatusLabel }}</span>
+        <span>字数 {{ wordCount }}</span>
+        <span>{{ currentFilePath ? '自动保存到当前文件' : '未命名文档：内容先保存为草稿' }}</span>
+        <span>快捷键：⌘/Ctrl+N O S Shift+S</span>
+      </div>
+
+      <div class="editor-wrapper">
+        <div id="vditor" class="vditor-container" />
+      </div>
+    </main>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onBeforeUnmount, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import Vditor from 'vditor'
-import { defaultContent } from '@config/default'
 import { convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core'
-import type { DialogFilter, SaveDialogOptions } from '@tauri-apps/plugin-dialog'
-
+import { defaultContent } from '@config/default'
 import { consumePendingOpenPaths, pendingOpenPaths } from '@utils/openPaths'
+import { basename, dirname, getRelativePath, isImagePath, isMarkdownPath, toFileUrl, truncateMiddle } from '@utils/path'
+import { clearDraft, loadDraft, loadRecentFiles, loadRecentProjects, pushRecentFile, pushRecentProject, saveDraft, type FolderEntry, type RecentItem, type SaveStatus } from '@utils/workbench'
 
 const router = useRouter()
 
-// Reactive state
 const isLoading = ref(true)
 const isDragging = ref(false)
-let vditor: Vditor | null = null
+const sidebarOpen = ref(true)
+const focusMode = ref(false)
+const theme = ref<'light' | 'dark'>('light')
+const widthMode = ref<'narrow' | 'medium' | 'wide'>('medium')
 const wordCount = ref(0)
-const settingsAnchorReady = ref(false)
-
-let vditorReadyResolve: (() => void) | null = null
-const vditorReady = new Promise<void>((resolve) => {
-  vditorReadyResolve = resolve
-})
-
-// Local storage key
-const STORAGE_KEY = 'carbo-markdown-content'
-
-// Image bed (MVP): store config in localStorage.
-// Note: Token in localStorage is NOT secure; MVP only.
-const IMAGE_BED_KEY = 'carbo-imagebed-config'
-
-type ImageBedConfig = {
-  enabled: boolean
-  repo: string
-  branch: string
-  pathPrefix: string
-  token: string
-}
-
-type GitHubUploadJob = {
-  localPath: string
-  localUrl: string
-}
-
-const MAX_GITHUB_CONTENTS_BYTES = 1_000_000
-
-const githubUploadQueue: GitHubUploadJob[] = []
-let githubUploadRunning = false
-
-const isImageBedDialogOpen = ref(false)
-const isSavingImageBed = ref(false)
-const isValidatingImageBed = ref(false)
-
-const imageBedForm = reactive<ImageBedConfig>({
-  enabled: false,
-  repo: '',
-  branch: 'main',
-  pathPrefix: 'images',
-  token: ''
-})
-
-const loadImageBed = () => {
-  try {
-    const raw = localStorage.getItem(IMAGE_BED_KEY)
-    if (!raw) return
-    const parsed: unknown = JSON.parse(raw)
-    if (typeof parsed !== 'object' || parsed === null) return
-
-    const r = parsed as Partial<ImageBedConfig>
-    imageBedForm.enabled = Boolean(r.enabled)
-    if (typeof r.repo === 'string') imageBedForm.repo = r.repo
-    if (typeof r.branch === 'string') imageBedForm.branch = r.branch
-    if (typeof r.pathPrefix === 'string') imageBedForm.pathPrefix = r.pathPrefix
-    if (typeof r.token === 'string') imageBedForm.token = r.token
-  } catch {
-    // ignore
-  }
-}
-
-const saveImageBed = async () => {
-  const repo = imageBedForm.repo.trim()
-  const branch = imageBedForm.branch.trim() || 'main'
-  const pathPrefix = imageBedForm.pathPrefix.trim() || 'images'
-
-  if (imageBedForm.enabled) {
-    if (!repo || !/^[^/]+\/[^/]+$/.test(repo)) {
-      ElMessage.error('Invalid repo format (owner/repo)')
-      return
-    }
-    if (!imageBedForm.token.trim()) {
-      ElMessage.error('Token is required')
-      return
-    }
-  }
-
-  isSavingImageBed.value = true
-  try {
-    const cfg: ImageBedConfig = {
-      enabled: imageBedForm.enabled,
-      repo,
-      branch,
-      pathPrefix,
-      token: imageBedForm.token.trim()
-    }
-    localStorage.setItem(IMAGE_BED_KEY, JSON.stringify(cfg))
-    ElMessage.success('Settings saved')
-    isImageBedDialogOpen.value = false
-  } finally {
-    isSavingImageBed.value = false
-  }
-}
-
-const validateImageBed = async () => {
-  const repo = imageBedForm.repo.trim()
-  if (!repo || !/^[^/]+\/[^/]+$/.test(repo)) {
-    ElMessage.error('Invalid repo format')
-    return
-  }
-  const token = imageBedForm.token.trim()
-  if (!token) {
-    ElMessage.error('Token is required')
-    return
-  }
-
-  isValidatingImageBed.value = true
-  try {
-    const result = await invoke<{ push: boolean; admin: boolean }>('github_validate_repo', { repo, token })
-    if (!result.push && !result.admin) {
-      ElMessage.error('Validation failed: No write access')
-      return
-    }
-    ElMessage.success('Validation successful')
-  } catch (e) {
-    ElMessage.error(`Validation error: ${String(e)}`)
-  } finally {
-    isValidatingImageBed.value = false
-  }
-}
-
-const getActiveImageBedConfig = (): ImageBedConfig | null => {
-  if (!imageBedForm.enabled) return null
-  const repo = imageBedForm.repo.trim()
-  const token = imageBedForm.token.trim()
-  if (!repo || !token) return null
-  return {
-    enabled: true,
-    repo,
-    branch: imageBedForm.branch.trim() || 'main',
-    pathPrefix: imageBedForm.pathPrefix.trim() || 'images',
-    token
-  }
-}
-
-const replaceUrlInEditor = (fromUrl: string, toUrl: string) => {
-  if (!vditor) return
-  const value = vditor.getValue()
-  if (!value.includes(fromUrl)) return
-  const updated = value.split(fromUrl).join(toUrl)
-  if (updated === value) return
-  vditor.setValue(updated)
-  localStorage.setItem(STORAGE_KEY, updated)
-}
-
-const runGitHubUploadQueue = async () => {
-  if (githubUploadRunning) return
-  githubUploadRunning = true
-  try {
-    while (githubUploadQueue.length > 0) {
-      const cfg = getActiveImageBedConfig()
-      if (!cfg) break
-
-      const job = githubUploadQueue.shift()
-      if (!job) break
-
-      try {
-        const rawUrl = await invoke<string>('github_upload_image_from_path', {
-          repo: cfg.repo,
-          branch: cfg.branch,
-          pathPrefix: cfg.pathPrefix,
-          token: cfg.token,
-          localPath: job.localPath,
-          maxBytes: MAX_GITHUB_CONTENTS_BYTES
-        })
-        replaceUrlInEditor(job.localUrl, rawUrl)
-      } catch (e) {
-        ElMessage.error(`Upload failed: ${String(e)}`)
-      }
-    }
-  } finally {
-    githubUploadRunning = false
-  }
-}
-
-const enqueueGitHubUpload = (job: GitHubUploadJob) => {
-  const cfg = getActiveImageBedConfig()
-  if (!cfg) return
-  githubUploadQueue.push(job)
-  void runGitHubUploadQueue()
-}
-
-// Track the content snapshot at the time of last open/save/init to detect changes on close
+const saveStatus = ref<SaveStatus>('idle')
+const currentFilePath = ref('')
+const openedFolderPath = ref('')
+const recentFiles = ref<RecentItem[]>(loadRecentFiles())
+const recentProjects = ref<RecentItem[]>(loadRecentProjects())
+const folderEntries = ref<FolderEntry[]>([])
+let vditor: Vditor | null = null
+let autosaveTimer: number | null = null
+let suspendInput = false
 let lastSavedContent = ''
 
-const applyEditorContent = (content: string) => {
-  if (!vditor) return
-  vditor.setValue(content)
-  localStorage.setItem(STORAGE_KEY, content)
-  lastSavedContent = content
-}
-
-const openPendingPaths = async (paths: string[]) => {
-  if (paths.length === 0) {
-    consumePendingOpenPaths()
-    return
-  }
-
-  await vditorReady
-  try {
-    await handleDroppedPaths(paths)
-  } finally {
-    consumePendingOpenPaths()
-  }
-}
-
-watch(
-  pendingOpenPaths,
-  (paths) => {
-    if (!paths || paths.length === 0) return
-    void openPendingPaths(paths)
-  },
-  { immediate: true }
-)
-
-// Initialize Vditor editor with local image support
-const initVditor = () => {
-  vditor = new Vditor('vditor', {
-    cdn: `${import.meta.env.BASE_URL}vditor`,
-    lang: 'zh_CN',
-    width: '100%',
-    height: '100%',
-    tab: '\t',
-    counter: { enable: true, max: 999999 },
-    typewriterMode: true,
-    mode: 'sv',
-    toolbarConfig: {
-      pin: true
-    },
-    hint: {
-      delay: 200
-    },
-    preview: {
-      delay: 100
-    },
-    outline: {
-      enable: true,
-      position: 'right'
-    },
-    cache: {
-      enable: false,
-      id: 'carbo-editor'
-    },
-    upload: {
-      handler: async (files: File[]) => {
-        for (const file of files) {
-          if (!file.type.startsWith('image/')) continue
-
-          const filePath = getDroppedFilePath(file)
-          if (filePath) {
-            await insertImageFromDiskPath(filePath)
-            continue
-          }
-
-          const savedPath = await saveImageToAppData(file)
-          if (savedPath) {
-            const localUrl = insertImageFromPath(savedPath)
-            if (localUrl) enqueueGitHubUpload({ localPath: savedPath, localUrl })
-            continue
-          }
-
-          const reader = new FileReader()
-          reader.onload = (e) => {
-            const base64 = e.target?.result as string
-            vditor?.insertValue(`![${file.name}](${base64})`)
-          }
-          reader.readAsDataURL(file)
-        }
-        return null
-      },
-      accept: 'image/*'
-    },
-    after: () => {
-      const content = localStorage.getItem(STORAGE_KEY) || defaultContent
-      vditor?.setValue(content)
-      lastSavedContent = content
-      vditor?.focus()
-      isLoading.value = false
-      wordCount.value = content.length
-
-      // Create mount point for settings button next to Vditor counter
-      const counter = document.querySelector('.vditor-counter')
-      if (counter && counter.parentElement && !document.getElementById('settings-anchor')) {
-        const anchor = document.createElement('div')
-        anchor.id = 'settings-anchor'
-        anchor.style.display = 'inline-flex'
-        anchor.style.alignItems = 'center'
-        anchor.style.marginRight = '4px'
-        counter.parentElement.insertBefore(anchor, counter)
-        settingsAnchorReady.value = true
-      }
-
-      vditorReadyResolve?.()
-      vditorReadyResolve = null
-    },
-    input: (value: string) => {
-      localStorage.setItem(STORAGE_KEY, value)
-      wordCount.value = value.length
-    }
-  })
-}
-
-// Set default content if empty
-const setDefaultContent = () => {
-  const savedContent = localStorage.getItem(STORAGE_KEY) || ''
-  if (!savedContent.trim()) {
-    localStorage.setItem(STORAGE_KEY, defaultContent)
-  }
-}
-
-// Drag and drop helpers
-type UnlistenFn = () => void
-
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null
-
-const devLog = (...args: unknown[]) => {
-  if (import.meta.env.DEV) console.log(...args)
-}
+const currentDocumentName = computed(() => currentFilePath.value ? basename(currentFilePath.value) : '未命名文档')
+const currentDocumentMeta = computed(() => {
+  if (currentFilePath.value) return truncateMiddle(currentFilePath.value, 88)
+  return '草稿模式 · 第一次保存后会绑定真实文件'
+})
+const isDirty = computed(() => !!vditor && vditor.getValue() !== lastSavedContent)
+const widthClass = computed(() => `width-${widthMode.value}`)
+const saveStatusLabel = computed(() => ({ idle: '未保存', saving: '正在保存…', saved: '已保存', error: '保存失败' }[saveStatus.value]))
 
 const isTauriRuntime = () => isTauri()
 
-const pickSavePath = async (options: SaveDialogOptions) => {
+const pickOpen = async (options: Record<string, unknown>) => {
+  const { open } = await import('@tauri-apps/plugin-dialog')
+  return await open(options)
+}
+
+const pickSavePath = async (options: Record<string, unknown>) => {
   const { save } = await import('@tauri-apps/plugin-dialog')
   return await save(options)
 }
 
-const escapeHtml = (input: string) =>
-  input
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-
-const getExportBaseName = (markdown: string) => {
-  const trimmed = markdown.trim()
-  if (!trimmed) return 'carbo-export'
-
-  const firstNonEmpty =
-    trimmed
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .find((l) => l.length > 0) ?? 'carbo-export'
-
-  const heading = /^#{1,6}\s+(.+)$/.exec(firstNonEmpty)
-  const rawName = (heading ? heading[1] : firstNonEmpty).trim()
-  const cleaned = rawName
-    .replace(/[\\/:*?"<>|]/g, '_')
-    .replace(/\s+/g, ' ')
-    .trim()
-
-  return (cleaned || 'carbo-export').slice(0, 50)
+const loadFolderEntries = async (folderPath: string) => {
+  if (!folderPath || !isTauriRuntime()) {
+    folderEntries.value = []
+    return
+  }
+  try {
+    folderEntries.value = await invoke<FolderEntry[]>('list_text_files_in_dir', { path: folderPath })
+    openedFolderPath.value = folderPath
+    recentProjects.value = pushRecentProject(folderPath)
+  } catch (error) {
+    folderEntries.value = []
+    ElMessage.error(`读取文件夹失败: ${String(error)}`)
+  }
 }
 
-const saveExportBytesWithDialog = async (params: {
-  title: string
-  fileName: string
-  filters: DialogFilter[]
-  bytes: number[]
-}) => {
-  if (!isTauriRuntime()) return null
+const applyEditorContent = (content: string) => {
+  if (!vditor) return
+  suspendInput = true
+  vditor.setValue(content)
+  suspendInput = false
+  wordCount.value = content.length
+  saveDraft(content)
+  lastSavedContent = content
+  saveStatus.value = currentFilePath.value ? 'saved' : 'idle'
+}
 
+const loadDocumentState = async (path: string, content: string) => {
+  currentFilePath.value = path
+  applyEditorContent(content)
+  recentFiles.value = pushRecentFile(path)
+  const folderPath = dirname(path)
+  if (folderPath) await loadFolderEntries(folderPath)
+}
+
+const openFilePath = async (path: string) => {
+  if (!vditor) return
+  try {
+    const content = isTauriRuntime()
+      ? await invoke<string>('read_text_file', { path })
+      : await fetch(toFileUrl(path)).then((res) => res.text())
+    await loadDocumentState(path, content)
+    ElMessage.success(`已打开 ${basename(path)}`)
+  } catch (error) {
+    ElMessage.error(`打开失败: ${String(error)}`)
+  }
+}
+
+const createNewDocument = () => {
+  currentFilePath.value = ''
+  saveStatus.value = 'idle'
+  openedFolderPath.value = ''
+  folderEntries.value = []
+  applyEditorContent(defaultContent)
+}
+
+const persistCurrentContent = async (targetPath: string) => {
+  if (!vditor) return ''
+  const content = vditor.getValue()
+  if (!isTauriRuntime()) {
+    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = basename(targetPath)
+    link.click()
+    URL.revokeObjectURL(url)
+    lastSavedContent = content
+    saveStatus.value = 'saved'
+    return targetPath
+  }
+
+  saveStatus.value = 'saving'
+  const savedPath = await invoke<string>('write_text_file', { path: targetPath, content })
+  currentFilePath.value = savedPath
+  lastSavedContent = content
+  saveStatus.value = 'saved'
+  saveDraft(content)
+  clearDraft()
+  recentFiles.value = pushRecentFile(savedPath)
+  const folderPath = dirname(savedPath)
+  if (folderPath) await loadFolderEntries(folderPath)
+  return savedPath
+}
+
+const saveAsDocument = async () => {
+  try {
+    const suggested = currentFilePath.value || 'untitled.md'
+    const filePath = await pickSavePath({
+      title: '另存为 Markdown',
+      defaultPath: suggested,
+      filters: [{ name: 'Markdown', extensions: ['md', 'markdown', 'txt'] }]
+    })
+    if (!filePath || Array.isArray(filePath)) return
+    const savedPath = await persistCurrentContent(filePath)
+    if (savedPath) ElMessage.success(`已保存到 ${savedPath}`)
+  } catch (error) {
+    saveStatus.value = 'error'
+    ElMessage.error(`保存失败: ${String(error)}`)
+  }
+}
+
+const saveDocument = async () => {
+  try {
+    if (!currentFilePath.value) {
+      await saveAsDocument()
+      return
+    }
+    const savedPath = await persistCurrentContent(currentFilePath.value)
+    if (savedPath) ElMessage.success('已保存')
+  } catch (error) {
+    saveStatus.value = 'error'
+    ElMessage.error(`保存失败: ${String(error)}`)
+  }
+}
+
+const scheduleAutosave = () => {
+  if (!currentFilePath.value || !vditor) return
+  if (autosaveTimer) window.clearTimeout(autosaveTimer)
+  autosaveTimer = window.setTimeout(async () => {
+    try {
+      await persistCurrentContent(currentFilePath.value)
+    } catch {
+      saveStatus.value = 'error'
+    }
+  }, 1200)
+}
+
+const openFile = async () => {
+  try {
+    const result = await pickOpen({
+      title: '打开 Markdown 文件',
+      multiple: false,
+      filters: [{ name: 'Markdown', extensions: ['md', 'markdown', 'txt'] }]
+    })
+    if (!result || Array.isArray(result)) return
+    await openFilePath(result)
+  } catch (error) {
+    ElMessage.error(`打开失败: ${String(error)}`)
+  }
+}
+
+const openFolderPath = async (folderPath: string) => {
+  await loadFolderEntries(folderPath)
+}
+
+const openFolder = async () => {
+  try {
+    const result = await pickOpen({ title: '打开文件夹', directory: true, multiple: false })
+    if (!result || Array.isArray(result)) return
+    await openFolderPath(result)
+  } catch (error) {
+    ElMessage.error(`打开文件夹失败: ${String(error)}`)
+  }
+}
+
+const saveExportBytesWithDialog = async (params: { title: string; fileName: string; filters: { name: string; extensions: string[] }[]; bytes: number[] }) => {
+  if (!isTauriRuntime()) return null
   const filePath = await pickSavePath({
     title: params.title,
     defaultPath: params.fileName,
     filters: params.filters
   })
-  if (!filePath) return null
-
-  return await invoke<string>('save_export_bytes', {
-    fileName: params.fileName,
-    filePath,
-    bytes: params.bytes
-  })
+  if (!filePath || Array.isArray(filePath)) return null
+  return await invoke<string>('save_export_bytes', { fileName: params.fileName, filePath, bytes: params.bytes })
 }
 
-const exportMarkdownToFile = async () => {
+const buildExportHtmlDocument = (title: string, bodyHtml: string) => `<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>${title}</title><style>
+:root{color-scheme:light}@page{size:A4;margin:18mm 16mm}body{margin:0;color:#111827;font:16px/1.75 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}main{max-width:860px;margin:0 auto;padding:24px 20px 48px}h1,h2,h3,h4{line-height:1.28;break-after:avoid-page}pre,blockquote,table,img{break-inside:avoid;page-break-inside:avoid}img{max-width:100%;height:auto}pre{padding:14px 16px;border-radius:12px;background:#f3f4f6;overflow:auto}code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}table{width:100%;border-collapse:collapse}th,td{border:1px solid #d1d5db;padding:8px 10px}blockquote{margin:0;padding-left:16px;border-left:4px solid #d1d5db;color:#4b5563}hr{border:0;border-top:1px solid #e5e7eb;margin:24px 0}a{color:#2563eb}
+</style></head><body><main class="markdown-body">${bodyHtml}</main></body></html>`
+
+const exportMarkdown = async () => {
   if (!vditor) return
-  const markdown = vditor.getValue()
-  const base = getExportBaseName(markdown)
-  try {
-    const fileName = `${base}.md`
-    const bytes = Array.from(new TextEncoder().encode(markdown))
-    const savedPath = await saveExportBytesWithDialog({
-      title: '导出 Markdown',
-      fileName,
-      filters: [{ name: 'Markdown', extensions: ['md'] }],
-      bytes
-    })
-    if (savedPath) ElMessage.success(`已导出: ${savedPath}`)
-  } catch (e) {
-    ElMessage.error(`导出失败: ${String(e)}`)
-  }
+  const fileName = `${currentDocumentName.value.replace(/\.(md|markdown|txt)$/i, '') || 'carbo-export'}.md`
+  const bytes = Array.from(new TextEncoder().encode(vditor.getValue()))
+  const savedPath = await saveExportBytesWithDialog({ title: '导出 Markdown', fileName, filters: [{ name: 'Markdown', extensions: ['md'] }], bytes })
+  if (savedPath) ElMessage.success(`已导出: ${savedPath}`)
 }
 
-const buildExportHtmlDocument = (title: string, bodyHtml: string) => {
-  const safeTitle = escapeHtml(title)
-  return `<!DOCTYPE html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>${safeTitle}</title>
-    <style>
-      :root { color-scheme: light; }
-      body { margin: 0; background: #fff; color: #111; }
-      main { max-width: 920px; margin: 0 auto; padding: 32px 20px; font: 16px/1.7 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans', Arial, sans-serif; }
-      h1, h2, h3 { line-height: 1.25; }
-      img { max-width: 100%; height: auto; }
-      pre { background: #f6f8fa; padding: 12px 14px; border-radius: 10px; overflow: auto; }
-      code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; }
-      blockquote { margin: 0; padding: 0 16px; border-left: 4px solid #e5e7eb; color: #374151; }
-      table { width: 100%; border-collapse: collapse; }
-      th, td { border: 1px solid #e5e7eb; padding: 8px 10px; }
-      a { color: #2563eb; }
-      hr { border: 0; border-top: 1px solid #e5e7eb; margin: 24px 0; }
-    </style>
-  </head>
-  <body>
-    <main>
-      ${bodyHtml}
-    </main>
-  </body>
-</html>`
-}
-
-const exportHtmlToFile = async () => {
+const exportHtml = async () => {
   if (!vditor) return
-  const markdown = vditor.getValue()
-  const base = getExportBaseName(markdown)
-  try {
-    const bodyHtml = vditor.getHTML()
-    const html = buildExportHtmlDocument(base, bodyHtml)
-    const fileName = `${base}.html`
-    const bytes = Array.from(new TextEncoder().encode(html))
-    const savedPath = await saveExportBytesWithDialog({
-      title: '导出 HTML',
-      fileName,
-      filters: [{ name: 'HTML', extensions: ['html'] }],
-      bytes
-    })
-    if (savedPath) ElMessage.success(`已导出: ${savedPath}`)
-  } catch (e) {
-    ElMessage.error(`导出失败: ${String(e)}`)
-  }
+  const fileName = `${currentDocumentName.value.replace(/\.(md|markdown|txt)$/i, '') || 'carbo-export'}.html`
+  const html = buildExportHtmlDocument(currentDocumentName.value, vditor.getHTML())
+  const bytes = Array.from(new TextEncoder().encode(html))
+  const savedPath = await saveExportBytesWithDialog({ title: '导出 HTML', fileName, filters: [{ name: 'HTML', extensions: ['html'] }], bytes })
+  if (savedPath) ElMessage.success(`已导出: ${savedPath}`)
 }
 
-const exportPdfViaRoute = () => {
-  // Reuse our dedicated export page which supports Tauri file save.
-  router.push({ path: '/export/pdf', query: { auto: '1' } })
-}
-
-const isVditorExportPanel = (panel: Element) =>
-  Boolean(
-    panel.querySelector('button[data-type="markdown"]') &&
-      panel.querySelector('button[data-type="pdf"]') &&
-      panel.querySelector('button[data-type="html"]')
-  )
-
-const onVditorExportClickCapture = (event: Event) => {
-  if (!isTauriRuntime()) return
-  if (!vditor) return
-
-  const target = event.target
-  if (!(target instanceof HTMLElement)) return
-  if (target.tagName !== 'BUTTON') return
-
-  const exportType = target.getAttribute('data-type')
-  if (exportType !== 'markdown' && exportType !== 'pdf' && exportType !== 'html') return
-
-  const panel = target.closest('.vditor-hint')
-  if (!panel) return
-  if (!isVditorExportPanel(panel)) return
-
-  event.preventDefault()
-  event.stopPropagation()
-  ;(panel as HTMLElement).style.display = 'none'
-
-  if (exportType === 'markdown') {
-    void exportMarkdownToFile()
-    return
-  }
-  if (exportType === 'html') {
-    void exportHtmlToFile()
-    return
-  }
-  exportPdfViaRoute()
-}
-
-const toFileUrl = (filePath: string) => {
-  const path = filePath.replace(/\\/g, '/')
-  if (/^[a-zA-Z]:\//.test(path)) return `file:///${encodeURI(path)}`
-  if (path.startsWith('/')) return `file://${encodeURI(path)}`
-  return filePath
-}
-
-const basename = (filePath: string) => {
-  const normalized = filePath.replace(/\\/g, '/')
-  const parts = normalized.split('/')
-  return parts[parts.length - 1] || filePath
-}
-
-const isMarkdownPath = (filePath: string) => {
-  const p = filePath.toLowerCase()
-  return p.endsWith('.md') || p.endsWith('.markdown') || p.endsWith('.txt')
-}
-
-const isImagePath = (filePath: string) => /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(filePath)
-
-const isFileDrag = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files')
-
-const readFileAsText = (file: File) =>
-  new Promise<string>((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = (event) => resolve((event.target?.result ?? '') as string)
-    reader.onerror = () => reject(new Error('FileReader error'))
-    reader.readAsText(file)
-  })
-
-const readFileAsDataUrl = (file: File) =>
-  new Promise<string>((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = (event) => resolve((event.target?.result ?? '') as string)
-    reader.onerror = () => reject(new Error('FileReader error'))
-    reader.readAsDataURL(file)
-  })
-
-const isMarkdownLike = (file: File) => {
-  const name = file.name.toLowerCase()
-  return name.endsWith('.md') || name.endsWith('.markdown') || name.endsWith('.txt')
-}
-
-const getDroppedFilePath = (file: File) => {
-  const maybeRecord: unknown = file
-  if (!isRecord(maybeRecord)) return null
-  const maybePath = maybeRecord['path']
-  return typeof maybePath === 'string' && maybePath.trim() ? maybePath : null
-}
-
-const openMarkdownFromPath = async (filePath: string) => {
-  if (!vditor) return
-
-  const content = isTauriRuntime()
-    ? await invoke<string>('read_text_file', { path: filePath })
-    : await (async () => {
-        const url = toFileUrl(filePath)
-        const res = await fetch(url)
-        if (!res.ok) throw new Error('Failed to read file')
-        return await res.text()
-      })()
-
-  applyEditorContent(content)
-  ElMessage.success(`Opened: ${basename(filePath)}`)
-}
-
-const insertImageFromPath = (filePath: string) => {
-  if (!vditor) return null
-  const url = isTauriRuntime() ? convertFileSrc(filePath) : toFileUrl(filePath)
-  vditor.insertValue(`![${basename(filePath)}](${url})`)
-  return url
-}
-
-const ensureImageInAppData = async (filePath: string) => {
-  if (!isTauriRuntime()) return filePath
-  const normalized = filePath.replace(/\\/g, '/')
-  if (normalized.includes('/carbo-assets/images/')) return filePath
-  return await invoke<string>('copy_image_to_app_data', { path: filePath })
-}
-
-const insertImageFromDiskPath = async (filePath: string) => {
-  const resolvedPath = await ensureImageInAppData(filePath)
-  const localUrl = insertImageFromPath(resolvedPath)
-  if (localUrl) {
-    enqueueGitHubUpload({ localPath: resolvedPath, localUrl })
-  }
-  return resolvedPath
-}
-
-const saveImageToAppData = async (file: File) => {
-  if (!isTauriRuntime()) return null
-  const buffer = await file.arrayBuffer()
-  const bytes = Array.from(new Uint8Array(buffer))
-
-  const result = await invoke<string>('save_image_bytes', {
-    fileName: file.name,
-    bytes
-  })
-  return result
-}
-
-const handleDroppedPaths = async (paths: string[]) => {
-  if (!vditor) return
-  if (paths.length === 0) return
-
-  const openTarget = paths.find(isMarkdownPath) ?? paths[0]
-  try {
-    if (isMarkdownPath(openTarget)) {
-      await openMarkdownFromPath(openTarget)
-      return
-    }
-
-    const images = paths.filter(isImagePath)
-    if (images.length > 0) {
-      for (const imgPath of images) await insertImageFromDiskPath(imgPath)
-      ElMessage.success(images.length === 1 ? `Inserted: ${basename(images[0])}` : `Inserted ${images.length} images`)
-    }
-  } catch {
-    ElMessage.error('Failed to open file')
-  }
-}
-
-const handleDroppedFiles = async (fileList: FileList) => {
-  if (!vditor) return
-
-  const files = Array.from(fileList)
-  if (files.length === 0) return
-
-  // Prefer opening a markdown-like file if present.
-  const openTarget = files.find(isMarkdownLike) ?? files[0]
-
-  try {
-    if (isMarkdownLike(openTarget)) {
-      const content = await readFileAsText(openTarget)
-      applyEditorContent(content)
-      ElMessage.success(`Opened: ${openTarget.name}`)
-      return
-    }
-
-    // For images: insert all dropped images.
-    const images = files.filter((f) => f.type.startsWith('image/'))
-    if (images.length > 0) {
-      for (const img of images) {
-        const filePath = getDroppedFilePath(img)
-        if (filePath) {
-          await insertImageFromDiskPath(filePath)
-          continue
-        }
-
-        const savedPath = await saveImageToAppData(img)
-        if (savedPath) {
-          insertImageFromPath(savedPath)
-          continue
-        }
-
-        const base64 = await readFileAsDataUrl(img)
-        vditor.insertValue(`![${img.name}](${base64})`)
-      }
-      ElMessage.success(images.length === 1 ? `Inserted: ${images[0].name}` : `Inserted ${images.length} images`)
-    }
-  } catch {
-    ElMessage.error('Failed to open file')
-  }
-}
-
-// Drag and drop handlers
-const onDragOver = (e: DragEvent) => {
-  if (isTauriRuntime()) return
-  if (!isFileDrag(e)) return
-  e.preventDefault()
-  isDragging.value = true
-}
-
-const onDragLeave = (e: DragEvent) => {
-  if (isTauriRuntime()) return
-  if (!isFileDrag(e)) return
-  isDragging.value = false
-}
-
-const onDrop = (e: DragEvent) => {
-  if (isTauriRuntime()) return
-  if (!isFileDrag(e)) return
-  e.preventDefault()
-  isDragging.value = false
-  const files = e.dataTransfer?.files
-  if (files) void handleDroppedFiles(files)
-}
-
-const onWindowDragOverCapture = (e: DragEvent) => {
-  if (isTauriRuntime()) return
-  if (!isFileDrag(e)) return
-  // Ensure dropping works even if inner components stop propagation.
-  e.preventDefault()
-}
-
-const onWindowDropCapture = (e: DragEvent) => {
-  if (isTauriRuntime()) return
-  if (!isFileDrag(e)) return
-  e.preventDefault()
-  isDragging.value = false
-  const files = e.dataTransfer?.files
-  if (files) void handleDroppedFiles(files)
-}
-
-let tauriUnlistenFileDrop: UnlistenFn | null = null
-
-const setupTauriFileDrop = async () => {
-  // Tauri v2: use the dedicated drag/drop API to receive real filesystem paths.
-  if (!isTauriRuntime()) return
-
-  try {
-    const { getCurrentWebview } = await import('@tauri-apps/api/webview')
-    devLog('[drag-drop] register onDragDropEvent')
-
-    tauriUnlistenFileDrop = await getCurrentWebview().onDragDropEvent((event) => {
-      devLog('[drag-drop] event', event.payload.type)
-
-      if (event.payload.type === 'over') {
-        isDragging.value = true
-        return
-      }
-
-      if (event.payload.type === 'drop') {
-        isDragging.value = false
-        void handleDroppedPaths(event.payload.paths)
-        return
-      }
-
-      // cancelled
-      isDragging.value = false
-    })
-  } catch (err) {
-    console.error('[drag-drop] failed to register', err)
-    if (import.meta.env.DEV) ElMessage.error('Drag drop init failed (check console)')
-  }
-}
-
-// Settings & export handlers
-const handleSetting = async (command: string) => {
+const handleCommand = async (command: string) => {
   switch (command) {
-    case 'export-image':
-      router.push('/export/image')
+    case 'export-pdf':
+      router.push({ path: '/export/pdf', query: { auto: '1', name: currentDocumentName.value } })
       break
-    case 'export-ppt':
-      router.push('/export/ppt')
+    case 'export-html':
+      await exportHtml()
       break
-    case 'import':
-      importFile()
+    case 'export-md':
+      await exportMarkdown()
       break
-    case 'imagebed':
-      isImageBedDialogOpen.value = true
+    case 'toggle-theme':
+      theme.value = theme.value === 'light' ? 'dark' : 'light'
       break
-    case 'clear':
-      try {
-        await ElMessageBox.confirm('确定要清空所有内容吗？', '提示', {
-          confirmButtonText: '确定',
-          cancelButtonText: '取消',
-          type: 'warning'
-        })
-        localStorage.removeItem(STORAGE_KEY)
-        vditor?.setValue('')
-        lastSavedContent = ''
-        wordCount.value = 0
-      } catch { }
+    case 'toggle-focus':
+      focusMode.value = !focusMode.value
+      break
+    case 'toggle-width':
+      widthMode.value = widthMode.value === 'narrow' ? 'medium' : widthMode.value === 'medium' ? 'wide' : 'narrow'
       break
     case 'about':
       router.push('/about')
@@ -855,407 +353,367 @@ const handleSetting = async (command: string) => {
   }
 }
 
-// Import file
-const importFile = () => {
-  const input = document.createElement('input')
-  input.type = 'file'
-  input.accept = '.md,.markdown,.txt,image/*'
-  input.onchange = (e: Event) => {
-    const file = (e.target as HTMLInputElement).files?.[0]
-    if (file) {
-      if (file.type.startsWith('image/')) {
-        const reader = new FileReader()
-        reader.onload = (event) => {
-          const base64 = event.target?.result as string
-          vditor?.insertValue(`![${file.name}](${base64})`)
-        }
-        reader.readAsDataURL(file)
-      } else {
-        const reader = new FileReader()
-        reader.onload = (event) => {
-          const content = event.target?.result as string
-          applyEditorContent(content)
-        }
-        reader.readAsText(file)
-      }
+const handleDroppedPaths = async (paths: string[]) => {
+  const markdownTarget = paths.find(isMarkdownPath)
+  if (markdownTarget) {
+    await openFilePath(markdownTarget)
+    return
+  }
+  const imageTargets = paths.filter(isImagePath)
+  if (imageTargets.length === 0 || !vditor) return
+  for (const path of imageTargets) {
+    if (currentFilePath.value && isTauriRuntime()) {
+      const savedPath = await invoke<string>('copy_image_for_document', { sourcePath: path, documentPath: currentFilePath.value })
+      const relativePath = getRelativePath(dirname(currentFilePath.value), savedPath)
+      vditor.insertValue(`![${basename(savedPath)}](${relativePath})`)
+    } else {
+      const url = isTauriRuntime() ? convertFileSrc(path) : toFileUrl(path)
+      vditor.insertValue(`![${basename(path)}](${url})`)
     }
   }
-  input.click()
 }
 
-// Lifecycle hooks
-onMounted(() => {
-  setDefaultContent()
-  loadImageBed()
-  initVditor()
-
-  // In Tauri, Vditor's built-in export relies on browser download/print.
-  // Intercept and export via backend file save.
-  document.addEventListener('click', onVditorExportClickCapture, true)
-
-  // Web fallback: use HTML5 drag/drop to read File objects.
-  if (!isTauriRuntime()) {
-    // Capture file drops globally so dropping works even if inner components stop propagation.
-    window.addEventListener('dragover', onWindowDragOverCapture, true)
-    window.addEventListener('drop', onWindowDropCapture, true)
-  }
-
-  // Tauri: native drag/drop yields real filesystem paths.
-  void setupTauriFileDrop()
-
-  // Intercept window close to prompt save if content changed
-  if (isTauriRuntime()) {
-    void setupTauriCloseGuard()
-  } else {
-    window.addEventListener('beforeunload', onBeforeUnload)
-  }
-})
-
-// Web: warn before closing if content changed
-const onBeforeUnload = (e: BeforeUnloadEvent) => {
-  if (!vditor) return
-  if (vditor.getValue() !== lastSavedContent) {
-    e.preventDefault()
-  }
+const onDragOver = (event: DragEvent) => {
+  event.preventDefault()
+  isDragging.value = true
 }
 
-// Tauri: intercept close, show save dialog
-let tauriUnlistenClose: (() => void) | null = null
+const onDragLeave = () => {
+  isDragging.value = false
+}
 
-const setupTauriCloseGuard = async () => {
-  const { getCurrentWindow } = await import('@tauri-apps/api/window')
-  const appWindow = getCurrentWindow()
-
-  tauriUnlistenClose = await appWindow.onCloseRequested(async (event) => {
-    if (!vditor) return
-    if (vditor.getValue() === lastSavedContent) return
-
-    event.preventDefault()
-
-    try {
-      await ElMessageBox.confirm('当前内容已修改，是否保存？', '提示', {
-        confirmButtonText: '保存',
-        cancelButtonText: '不保存',
-        distinguishCancelAndClose: true,
-        type: 'warning'
+const onDrop = async (event: DragEvent) => {
+  event.preventDefault()
+  isDragging.value = false
+  const files = Array.from(event.dataTransfer?.files || [])
+  const pathList = files.map((file) => (file as File & { path?: string }).path).filter((value): value is string => Boolean(value))
+  if (pathList.length > 0) {
+    await handleDroppedPaths(pathList)
+    return
+  }
+  for (const file of files) {
+    if (!file.type.startsWith('image/') || !vditor) continue
+    if (currentFilePath.value && isTauriRuntime()) {
+      const buffer = await file.arrayBuffer()
+      const savedPath = await invoke<string>('save_image_for_document', {
+        fileName: file.name,
+        bytes: Array.from(new Uint8Array(buffer)),
+        documentPath: currentFilePath.value
       })
-      // User clicked "保存"
-      await exportMarkdownToFile()
-      await appWindow.destroy()
-    } catch (action) {
-      if (action === 'cancel') {
-        // User clicked "不保存" — close without saving
-        await appWindow.destroy()
+      const relativePath = getRelativePath(dirname(currentFilePath.value), savedPath)
+      vditor.insertValue(`![${basename(savedPath)}](${relativePath})`)
+      continue
+    }
+    const reader = new FileReader()
+    reader.onload = (e) => vditor?.insertValue(`![${file.name}](${e.target?.result as string})`)
+    reader.readAsDataURL(file)
+  }
+}
+
+const handleKeydown = (event: KeyboardEvent) => {
+  const mod = event.metaKey || event.ctrlKey
+  if (!mod) return
+  if (event.key.toLowerCase() === 's') {
+    event.preventDefault()
+    if (event.shiftKey) void saveAsDocument()
+    else void saveDocument()
+  }
+  if (event.key.toLowerCase() === 'o') {
+    event.preventDefault()
+    void openFile()
+  }
+  if (event.key.toLowerCase() === 'n') {
+    event.preventDefault()
+    createNewDocument()
+  }
+}
+
+const initVditor = () => {
+  vditor = new Vditor('vditor', {
+    cdn: `${import.meta.env.BASE_URL}vditor`,
+    lang: 'zh_CN',
+    width: '100%',
+    height: '100%',
+    tab: '\t',
+    mode: 'sv',
+    typewriterMode: true,
+    counter: { enable: true, max: 999999 },
+    cache: { enable: false, id: 'carbo-editor' },
+    outline: { enable: true, position: 'right' },
+    preview: { delay: 120 },
+    upload: {
+      handler: async (files: File[]) => {
+        for (const file of files) {
+          if (!file.type.startsWith('image/')) continue
+          if (currentFilePath.value && isTauriRuntime()) {
+            const buffer = await file.arrayBuffer()
+            const savedPath = await invoke<string>('save_image_for_document', {
+              fileName: file.name,
+              bytes: Array.from(new Uint8Array(buffer)),
+              documentPath: currentFilePath.value
+            })
+            const relativePath = getRelativePath(dirname(currentFilePath.value), savedPath)
+            vditor?.insertValue(`![${basename(savedPath)}](${relativePath})`)
+          } else {
+            const reader = new FileReader()
+            reader.onload = (event) => vditor?.insertValue(`![${file.name}](${event.target?.result as string})`)
+            reader.readAsDataURL(file)
+          }
+        }
+        return null
       }
-      // User clicked close (X) on the dialog — stay open
+    },
+    after: async () => {
+      const draft = loadDraft() || defaultContent
+      applyEditorContent(draft)
+      isLoading.value = false
+      const pending = consumePendingOpenPaths()
+      if (pending && pending.length > 0) await handleDroppedPaths(pending)
+    },
+    input: (value: string) => {
+      if (suspendInput) return
+      wordCount.value = value.length
+      saveDraft(value)
+      saveStatus.value = currentFilePath.value ? 'idle' : 'idle'
+      scheduleAutosave()
     }
   })
 }
 
+watch(pendingOpenPaths, async (paths) => {
+  if (!paths || paths.length === 0) return
+  await handleDroppedPaths(paths)
+  consumePendingOpenPaths()
+})
+
+onMounted(() => {
+  initVditor()
+  window.addEventListener('keydown', handleKeydown)
+})
+
 onBeforeUnmount(() => {
-  window.removeEventListener('beforeunload', onBeforeUnload)
-  window.removeEventListener('dragover', onWindowDragOverCapture, true)
-  window.removeEventListener('drop', onWindowDropCapture, true)
-  document.removeEventListener('click', onVditorExportClickCapture, true)
-  tauriUnlistenFileDrop?.()
-  tauriUnlistenClose?.()
+  window.removeEventListener('keydown', handleKeydown)
+  if (autosaveTimer) window.clearTimeout(autosaveTimer)
   vditor?.destroy()
 })
 </script>
 
 <style scoped>
-.main-page {
-  width: 100%;
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-  background-color: var(--color-bg-primary);
-  position: relative;
+.workbench {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  background: #f5f7fb;
+  color: #111827;
 }
 
-/* Header Navigation */
-.header-nav {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: var(--header-height);
-  background-color: var(--color-bg-primary);
-  border-bottom: 1px solid var(--color-border);
-  z-index: 1000;
+.workbench.theme-dark {
+  background: #0f172a;
+  color: #e5e7eb;
 }
 
-.header-content {
-  max-width: var(--max-content-width);
-  height: 100%;
-  margin: 0 auto;
-  padding: 0 var(--space-4);
+.sidebar {
+  border-right: 1px solid rgba(148, 163, 184, 0.18);
+  padding: 18px 14px;
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(14px);
+  overflow: auto;
+}
+
+.theme-dark .sidebar,
+.theme-dark .topbar,
+.theme-dark .statusbar {
+  background: rgba(15, 23, 42, 0.82);
+}
+
+.sidebar-top,
+.topbar,
+.statusbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
 }
 
-.header-logo {
-  flex-shrink: 0;
+.sidebar-section {
+  margin-top: 20px;
 }
 
-.logo-link {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  color: var(--color-text-primary);
-  font-weight: 600;
-  font-size: 16px;
-  text-decoration: none;
-  letter-spacing: -0.01em;
+.section-title {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #64748b;
+  margin-bottom: 10px;
 }
 
-.logo-img {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  object-fit: contain;
-  flex: 0 0 auto;
-}
-
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.action-btn {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 10px;
-  background-color: transparent;
-  color: var(--color-text-secondary);
-  border: none;
-  border-radius: var(--radius-md);
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.action-btn:hover {
-  background-color: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
-}
-
-.action-btn.icon-btn {
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  justify-content: center;
-  border-radius: 999px;
-}
-
-.settings-icon {
-  width: 18px;
-  height: 18px;
-}
-
-.dropdown-icon {
-  font-size: 10px;
-  opacity: 0.5;
-  margin-left: 2px;
-}
-
-/* Bottom settings button - injected into Vditor counter area */
-.bottom-settings-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  color: var(--color-text-tertiary);
-  transition: all var(--transition-fast);
-}
-
-.bottom-settings-btn:hover {
-  background-color: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
-}
-
-.bottom-settings-btn .settings-icon {
-  width: 14px;
-  height: 14px;
-}
-
-/* Drop Zone */
-.drop-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(255, 255, 255, 0.9);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 2000;
-  border: 2px dashed var(--color-text-tertiary);
-  margin: 16px;
-  border-radius: var(--radius-lg);
-  backdrop-filter: blur(4px);
-}
-
-.drop-message {
+.sidebar-item {
+  width: 100%;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: var(--space-4);
-  color: var(--color-text-secondary);
-  font-size: var(--text-lg);
-  font-weight: 500;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
 }
 
-.drop-icon {
-  font-size: 48px;
+.sidebar-item.active,
+.sidebar-item:hover,
+.toolbar-btn:hover,
+.ghost-btn:hover {
+  background: rgba(37, 99, 235, 0.08);
 }
 
-/* Editor Wrapper */
-.editor-wrapper {
+.sidebar-item span,
+.doc-meta,
+.empty-text,
+.folder-path,
+.statusbar {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.editor-shell {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.topbar {
+  padding: 22px 28px 10px;
+}
+
+.statusbar {
+  padding: 0 28px 14px;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.editor-wrapper {
   flex: 1;
-  width: 100%;
-  overflow: visible;
-  background-color: var(--color-bg-primary);
+  padding: 0 20px 20px;
+  min-height: 0;
 }
 
 .vditor-container {
-  height: 100%;
+  height: calc(100vh - 120px);
+  border-radius: 24px;
+  overflow: hidden;
+  box-shadow: 0 20px 48px rgba(15, 23, 42, 0.08);
 }
 
-:deep(.vditor) {
-  border: none !important;
-  overflow: visible !important;
-}
-
-:deep(.vditor-toolbar) {
-  display: flow-root !important;
-  padding: 0 var(--space-4) !important;
-  border-bottom: 1px solid var(--color-border) !important;
-  background-color: var(--color-bg-primary) !important;
-  overflow: visible !important;
-}
-
-/* The pinned toolbar creates a stacking context (z-index: 1 in Vditor).
-   Raise it above the fixed header so tooltips aren't hidden behind it. */
-:deep(.vditor-toolbar--pin) {
-  z-index: 1100 !important;
-}
-
-:deep(.vditor-toolbar__item) {
-  overflow: visible !important;
-}
-
-:deep(.vditor-content) {
-  font-family: var(--font-primary) !important;
-}
-
-/* Vditor Toolbar Tooltips - Force all tooltips to display ABOVE (north) */
-/* Keep a consistent gap between buttons and tooltips */
-:deep(.vditor-tooltipped) {
-  position: relative;
-  overflow: visible !important;
-}
-
-/* Force all toolbar tooltips to display ABOVE the button */
-:deep(.vditor-toolbar__item .vditor-tooltipped__s::after),
-:deep(.vditor-toolbar__item .vditor-tooltipped__se::after),
-:deep(.vditor-toolbar__item .vditor-tooltipped__sw::after),
-:deep(.vditor-toolbar__item .vditor-tooltipped__n::after),
-:deep(.vditor-toolbar__item .vditor-tooltipped__ne::after),
-:deep(.vditor-toolbar__item .vditor-tooltipped__nw::after) {
-  top: auto !important;
-  bottom: 100% !important;
-  margin-top: 0 !important;
-  margin-bottom: 5px !important;
-  left: 50% !important;
-  right: auto !important;
-  transform: translateX(-50%) !important;
-  margin-left: 0 !important;
-  margin-right: 0 !important;
-}
-
-:deep(.vditor-toolbar__item .vditor-tooltipped__s::before),
-:deep(.vditor-toolbar__item .vditor-tooltipped__se::before),
-:deep(.vditor-toolbar__item .vditor-tooltipped__sw::before),
-:deep(.vditor-toolbar__item .vditor-tooltipped__n::before),
-:deep(.vditor-toolbar__item .vditor-tooltipped__ne::before),
-:deep(.vditor-toolbar__item .vditor-tooltipped__nw::before) {
-  top: -5px !important;
-  bottom: auto !important;
-  border-top-color: #3b3e43 !important;
-  border-bottom-color: transparent !important;
-  left: 50% !important;
-  right: auto !important;
-  margin-left: -5px !important;
-  margin-right: 0 !important;
-}
-
-:deep(.vditor-tooltipped:hover::before),
-:deep(.vditor-tooltipped:hover::after) {
-  display: inline-block !important;
-  opacity: 1 !important;
-  visibility: visible !important;
-  text-decoration: none !important;
-  animation: tooltip-appear 0.15s ease-in forwards !important;
-}
-
-@keyframes tooltip-appear {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-/* Dialog Footer */
-.dialog-footer {
+.doc-title-row {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-}
-</style>
-
-<style>
-/* Unscoped: styles for teleported settings button in Vditor counter area */
-#settings-anchor {
-  display: inline-flex;
-  align-items: center;
-  float: right;
-  margin-right: 2px;
-  height: 100%;
+  gap: 8px;
 }
 
-#settings-anchor .bottom-settings-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
+.doc-title-row h1 {
+  margin: 0;
+  font-size: 26px;
+}
+
+.dirty-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #f59e0b;
+  opacity: 0;
+}
+
+.dirty-dot.visible {
+  opacity: 1;
+}
+
+.toolbar-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.toolbar-btn,
+.ghost-btn {
+  border: 0;
+  border-radius: 999px;
+  padding: 10px 14px;
   background: transparent;
-  border: none;
-  border-radius: 4px;
   cursor: pointer;
-  color: #959ba5;
-  transition: all 0.15s ease;
+  color: inherit;
 }
 
-#settings-anchor .bottom-settings-btn:hover {
-  background-color: rgba(0, 0, 0, 0.06);
-  color: #1a1a1a;
+.toolbar-btn.primary {
+  background: #111827;
+  color: #fff;
 }
 
-#settings-anchor .bottom-settings-btn .settings-icon {
-  width: 14px;
-  height: 14px;
+.theme-dark .toolbar-btn.primary {
+  background: #e5e7eb;
+  color: #111827;
+}
+
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: rgba(15, 23, 42, 0.12);
+  display: grid;
+  place-items: center;
+}
+
+.drop-card {
+  padding: 22px 28px;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 20px 48px rgba(15, 23, 42, 0.12);
+}
+
+.width-narrow .editor-wrapper,
+.width-narrow .topbar,
+.width-narrow .statusbar {
+  max-width: 980px;
+}
+
+.width-medium .editor-wrapper,
+.width-medium .topbar,
+.width-medium .statusbar {
+  max-width: 1240px;
+}
+
+.width-wide .editor-wrapper,
+.width-wide .topbar,
+.width-wide .statusbar {
+  max-width: 100%;
+}
+
+.sidebar-collapsed {
+  grid-template-columns: 88px 1fr;
+}
+
+.focus-mode :deep(.vditor-preview > *:not(:hover)) {
+  opacity: 0.72;
+}
+
+.theme-dark :deep(.vditor),
+.theme-dark :deep(.vditor-toolbar),
+.theme-dark :deep(.vditor-content),
+.theme-dark :deep(.vditor-preview) {
+  background: #111827 !important;
+  color: #e5e7eb !important;
+}
+
+@media (max-width: 960px) {
+  .workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    display: none;
+  }
 }
 </style>

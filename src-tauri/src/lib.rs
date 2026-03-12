@@ -16,6 +16,12 @@ struct OpenPathsPayload {
     paths: Vec<String>,
 }
 
+#[derive(Serialize)]
+struct FileTreeEntry {
+    path: String,
+    name: String,
+}
+
 fn extract_open_paths_from_args<I>(args: I) -> Vec<String>
 where
     I: IntoIterator<Item = String>,
@@ -307,6 +313,87 @@ fn consume_startup_open_paths(
     Ok(guard.drain(..).collect())
 }
 
+#[tauri::command]
+fn write_text_file(path: String, content: String) -> Result<String, String> {
+    let p = std::path::PathBuf::from(&path);
+    if !is_allowed_text_extension(&p) {
+        return Err("unsupported file type".to_string());
+    }
+    if let Some(parent) = p.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&p, content).map_err(|e| e.to_string())?;
+    Ok(p.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn list_text_files_in_dir(path: String) -> Result<Vec<FileTreeEntry>, String> {
+    let dir = std::path::PathBuf::from(path);
+    if !dir.is_dir() {
+        return Err("not a directory".to_string());
+    }
+    collect_text_entries(&dir)
+}
+
+#[tauri::command]
+fn copy_image_for_document(source_path: String, document_path: String) -> Result<String, String> {
+    let src = std::path::PathBuf::from(source_path);
+    if !is_allowed_image_extension(&src) {
+        return Err("unsupported image type".to_string());
+    }
+    let doc = std::path::PathBuf::from(document_path);
+    let doc_dir = doc.parent().ok_or_else(|| "document has no parent directory".to_string())?;
+    let doc_stem = doc
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("document");
+    let assets_dir = doc_dir.join(format!("{}.assets", sanitize_git_path_component(doc_stem)));
+    std::fs::create_dir_all(&assets_dir).map_err(|e| e.to_string())?;
+
+    let extension = src
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("png")
+        .to_ascii_lowercase();
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_millis();
+    let filename = format!("{}-{}.{}", ts, sanitize_git_path_component(doc_stem), extension);
+    let destination = assets_dir.join(filename);
+    std::fs::copy(&src, &destination).map_err(|e| e.to_string())?;
+    Ok(destination.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn save_image_for_document(file_name: String, bytes: Vec<u8>, document_path: String) -> Result<String, String> {
+    let doc = std::path::PathBuf::from(document_path);
+    let doc_dir = doc.parent().ok_or_else(|| "document has no parent directory".to_string())?;
+    let doc_stem = doc
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("document");
+    let assets_dir = doc_dir.join(format!("{}.assets", sanitize_git_path_component(doc_stem)));
+    std::fs::create_dir_all(&assets_dir).map_err(|e| e.to_string())?;
+
+    let source_name = sanitize_file_name(&file_name);
+    let extension = std::path::Path::new(&source_name)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("png")
+        .to_ascii_lowercase();
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_millis();
+    let filename = format!("{}-{}.{}", ts, sanitize_git_path_component(doc_stem), extension);
+    let destination = assets_dir.join(filename);
+    std::fs::write(&destination, bytes).map_err(|e| e.to_string())?;
+    Ok(destination.to_string_lossy().to_string())
+}
+
 fn sanitize_file_name(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     for ch in input.chars() {
@@ -331,6 +418,27 @@ fn write_export_bytes(
     let path = dir.join(format!("{}-{}", ts, file_name));
     std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
     Ok(path)
+}
+
+fn collect_text_entries(dir: &std::path::Path) -> Result<Vec<FileTreeEntry>, String> {
+    let mut entries: Vec<FileTreeEntry> = std::fs::read_dir(dir)
+        .map_err(|e| e.to_string())?
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| {
+            let path = entry.path();
+            if !path.is_file() || !is_allowed_text_extension(&path) {
+                return None;
+            }
+            let name = path.file_name()?.to_str()?.to_string();
+            Some(FileTreeEntry {
+                path: path.to_string_lossy().to_string(),
+                name,
+            })
+        })
+        .collect();
+
+    entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(entries)
 }
 
 #[tauri::command]
@@ -474,6 +582,10 @@ pub fn run() {
             github_validate_repo,
             github_upload_image_from_path,
             read_text_file,
+            write_text_file,
+            list_text_files_in_dir,
+            copy_image_for_document,
+            save_image_for_document,
             consume_startup_open_paths
         ])
         .setup(|app| {

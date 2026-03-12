@@ -1,46 +1,74 @@
 <template>
   <div class="export-page">
-    <div class="export-header">
+    <div class="export-header no-print">
       <router-link to="/" class="back-btn">← 返回</router-link>
-      <h1>导出 PDF</h1>
-    </div>
-    <div class="export-content">
-      <div class="preview-area" ref="previewRef">
-        <div v-html="htmlContent" class="markdown-body"></div>
-      </div>
-      <div class="export-actions">
-        <el-button type="primary" @click="exportPdf">导出 PDF</el-button>
+      <div>
+        <h1>导出 PDF</h1>
+        <p>使用打印式排版导出，文字可选中，分页更稳定。</p>
       </div>
     </div>
+
+    <div class="export-actions no-print">
+      <el-button @click="saveHtml">保存 HTML</el-button>
+      <el-button type="primary" @click="printPdf">打印 / 导出 PDF</el-button>
+    </div>
+
+    <article class="preview-area markdown-body" ref="previewRef" v-html="htmlContent"></article>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { useRoute } from 'vue-router'
 import Vditor from 'vditor'
 import { invoke, isTauri } from '@tauri-apps/api/core'
-import { useRoute } from 'vue-router'
 import type { DialogFilter, SaveDialogOptions } from '@tauri-apps/plugin-dialog'
 
+const STORAGE_KEY = 'carbo-markdown-content'
+const route = useRoute()
 const previewRef = ref<HTMLElement | null>(null)
 const htmlContent = ref('')
 
-const STORAGE_KEY = 'carbo-markdown-content'
+const title = computed(() => (route.query.name as string) || 'carbo-export')
 
-const route = useRoute()
+const buildHtmlDocument = (bodyHtml: string) => `<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${title.value}</title>
+    <style>
+      :root { color-scheme: light; }
+      @page { size: A4; margin: 18mm 16mm; }
+      * { box-sizing: border-box; }
+      body { margin: 0; color: #111827; font: 16px/1.75 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+      article { max-width: 860px; margin: 0 auto; padding: 24px 20px 48px; }
+      h1, h2, h3, h4 { line-height: 1.28; break-after: avoid-page; }
+      p, li, blockquote { orphans: 3; widows: 3; }
+      pre, blockquote, table, img { break-inside: avoid; page-break-inside: avoid; }
+      img { max-width: 100%; height: auto; }
+      pre { padding: 14px 16px; border-radius: 12px; background: #f3f4f6; overflow: auto; }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border: 1px solid #d1d5db; padding: 8px 10px; }
+      blockquote { margin: 0; padding-left: 16px; border-left: 4px solid #d1d5db; color: #4b5563; }
+      hr { border: 0; border-top: 1px solid #e5e7eb; margin: 24px 0; }
+      a { color: #2563eb; }
+    </style>
+  </head>
+  <body>
+    <article class="markdown-body">${bodyHtml}</article>
+  </body>
+</html>`
 
 const pickSavePath = async (options: SaveDialogOptions) => {
   const { save } = await import('@tauri-apps/plugin-dialog')
   return await save(options)
 }
 
-const saveExportBytes = async (params: {
-  title: string
-  fileName: string
-  filters: DialogFilter[]
-  bytes: number[]
-}) => {
+const saveExportBytes = async (params: { title: string; fileName: string; filters: DialogFilter[]; bytes: number[] }) => {
+  if (!isTauri()) return null
   const filePath = await pickSavePath({
     title: params.title,
     defaultPath: params.fileName,
@@ -54,126 +82,114 @@ const saveExportBytes = async (params: {
   })
 }
 
+const saveHtml = async () => {
+  try {
+    const html = buildHtmlDocument(htmlContent.value)
+    const fileName = `${title.value}.html`
+    const bytes = Array.from(new TextEncoder().encode(html))
+
+    if (isTauri()) {
+      const savedPath = await saveExportBytes({
+        title: '导出 HTML',
+        fileName,
+        filters: [{ name: 'HTML', extensions: ['html'] }],
+        bytes
+      })
+      if (savedPath) ElMessage.success(`已保存: ${savedPath}`)
+      return
+    }
+
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = fileName
+    link.click()
+    URL.revokeObjectURL(url)
+  } catch (error) {
+    ElMessage.error(`保存失败: ${String(error)}`)
+  }
+}
+
+const printPdf = async () => {
+  await nextTick()
+  window.print()
+}
+
 onMounted(async () => {
   const markdown = localStorage.getItem(STORAGE_KEY) || ''
   htmlContent.value = await Vditor.md2html(markdown)
 
   if (route.query.auto === '1') {
-    await nextTick()
-    // Allow DOM + images to settle a bit for canvas capture.
     setTimeout(() => {
-      void exportPdf()
-    }, 60)
+      void printPdf()
+    }, 80)
   }
 })
-
-const exportPdf = async () => {
-  if (!previewRef.value) return
-
-  try {
-    const html2canvas = (await import('html2canvas')).default
-    const { jsPDF } = await import('jspdf')
-
-    const canvas = await html2canvas(previewRef.value, {
-      backgroundColor: '#ffffff',
-      scale: 2,
-      useCORS: true,
-      allowTaint: true
-    })
-
-    const width = canvas.width
-    const height = canvas.height
-    const orientation: 'portrait' | 'landscape' = width > height ? 'landscape' : 'portrait'
-
-    const pdf = new jsPDF({
-      orientation,
-      unit: 'px',
-      format: [width, height]
-    })
-    const imgData = canvas.toDataURL('image/jpeg', 0.92)
-    if (!imgData.startsWith('data:image/jpeg')) {
-      throw new Error('Failed to build JPEG data URL')
-    }
-    pdf.addImage(imgData, 'JPEG', 0, 0, width, height)
-
-    const fileName = 'carbo-export.pdf'
-
-    if (isTauri()) {
-      const bytes = Array.from(new Uint8Array(pdf.output('arraybuffer')))
-      const savedPath = await saveExportBytes({
-        title: '导出 PDF',
-        fileName,
-        filters: [{ name: 'PDF', extensions: ['pdf'] }],
-        bytes
-      })
-      if (savedPath) ElMessage.success(`已导出: ${savedPath}`)
-      return
-    }
-
-    pdf.save(fileName)
-    ElMessage.success('PDF 导出成功')
-  } catch (error) {
-    ElMessage.error(`导出失败: ${String(error)}`)
-    console.error(error)
-  }
-}
 </script>
 
 <style scoped>
 .export-page {
   min-height: 100vh;
-  background-color: var(--color-bg-secondary);
-  padding: var(--space-6);
+  background: #f5f7fb;
+  padding: 24px;
 }
 
-.export-header {
-  max-width: 800px;
-  margin: 0 auto var(--space-6);
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-}
-
-.export-header h1 {
-  font-size: var(--text-xl);
-  font-weight: var(--font-weight-semibold);
-}
-
-.back-btn {
-  color: var(--color-text-secondary);
-}
-
-.export-content {
-  max-width: 800px;
+.export-header,
+.export-actions,
+.preview-area {
+  max-width: 920px;
   margin: 0 auto;
 }
 
-.preview-area {
-  background-color: var(--color-bg-primary);
-  border-radius: var(--radius-lg);
-  padding: var(--space-8);
-  margin-bottom: var(--space-4);
-  box-shadow: var(--shadow-md);
+.export-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.export-header h1 {
+  margin: 0;
+  font-size: 28px;
+}
+
+.export-header p {
+  margin: 4px 0 0;
+  color: #6b7280;
 }
 
 .export-actions {
   display: flex;
-  gap: var(--space-3);
-  justify-content: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.preview-area {
+  background: #fff;
+  border-radius: 20px;
+  box-shadow: 0 20px 48px rgba(15, 23, 42, 0.08);
+  padding: 40px 44px;
+}
+
+.back-btn {
+  color: #4b5563;
 }
 
 @media print {
-  .export-header,
-  .export-actions {
-    display: none;
+  .no-print {
+    display: none !important;
   }
-  
+
   .export-page {
     padding: 0;
-    background: white;
+    background: #fff;
   }
-  
+
   .preview-area {
+    max-width: none;
+    padding: 0;
     box-shadow: none;
     border-radius: 0;
   }
