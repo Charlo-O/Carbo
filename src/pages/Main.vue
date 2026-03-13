@@ -81,12 +81,20 @@
       </div>
 
       <div v-if="searchPanelOpen" class="search-panel">
-        <input v-model="searchQuery" class="search-input" placeholder="搜索文本" @keydown.enter.prevent="runSearch" />
-        <input v-model="replaceQuery" class="search-input" placeholder="替换为（可选）" @keydown.enter.prevent="replaceNext" />
-        <button class="toolbar-btn" @click="runSearch">查找</button>
-        <button class="toolbar-btn" @click="replaceNext">替换下一个</button>
-        <button class="toolbar-btn" @click="replaceAll">全部替换</button>
-        <button class="toolbar-btn" @click="searchPanelOpen = false">关闭</button>
+        <div class="search-row">
+          <input v-model="searchQuery" class="search-input" placeholder="搜索文本"
+            @keydown.enter.exact.prevent="findNext"
+            @keydown.shift.enter.prevent="findPrev" />
+          <span class="search-count" v-if="searchMatches.length > 0">{{ currentMatchIdx + 1 }}/{{ searchMatches.length }}</span>
+          <button class="toolbar-btn icon-btn" title="上一个 (Shift+Enter)" @click="findPrev">↑</button>
+          <button class="toolbar-btn icon-btn" title="下一个 (Enter)" @click="findNext">↓</button>
+        </div>
+        <div class="search-row">
+          <input v-model="replaceQuery" class="search-input" placeholder="替换为（可选）" @keydown.enter.prevent="replaceNext" />
+          <button class="toolbar-btn" @click="replaceNext">替换</button>
+          <button class="toolbar-btn" @click="replaceAll">全部</button>
+          <button class="toolbar-btn" @click="searchPanelOpen = false">关闭</button>
+        </div>
       </div>
 
       <div class="editor-wrapper">
@@ -94,24 +102,86 @@
       </div>
     </main>
   </div>
+
+  <Teleport to="body">
+    <div v-if="commandPaletteOpen" class="cmd-backdrop" @click="commandPaletteOpen = false">
+      <div class="cmd-palette" @click.stop @keydown.escape.prevent="commandPaletteOpen = false">
+        <input
+          ref="cmdInputRef"
+          v-model="commandPaletteQuery"
+          class="cmd-input"
+          placeholder="搜索文件…"
+          @keydown.escape.prevent="commandPaletteOpen = false"
+          @keydown.enter.prevent="cmdPaletteConfirm"
+          @keydown.up.prevent="commandPaletteIdx = Math.max(0, commandPaletteIdx - 1)"
+          @keydown.down.prevent="commandPaletteIdx = Math.min(commandPaletteFiles.length - 1, commandPaletteIdx + 1)"
+        />
+        <div class="cmd-list">
+          <div v-if="commandPaletteFiles.length === 0" class="cmd-empty">
+            {{ openedFolderPath ? '没有匹配的文件' : '请先打开一个文件夹' }}
+          </div>
+          <button
+            v-for="(file, i) in commandPaletteFiles"
+            :key="file.path"
+            class="cmd-item"
+            :class="{ active: i === commandPaletteIdx }"
+            @click="cmdPaletteSelect(file.path)"
+            @mouseenter="commandPaletteIdx = i"
+          >
+            <span class="cmd-item-name">{{ file.name }}</span>
+            <span class="cmd-item-path">{{ truncateMiddle(file.path, 64) }}</span>
+          </button>
+        </div>
+        <div class="cmd-footer">
+          <span>↑↓ 导航</span>
+          <span>↵ 打开</span>
+          <span>Esc 关闭</span>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import Vditor from 'vditor'
+import type Vditor from 'vditor'
 import { convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core'
 import { defaultContent } from '@config/default'
 import { consumePendingOpenPaths, pendingOpenPaths } from '@utils/openPaths'
 import { basename, dirname, getRelativePath, isImagePath, isMarkdownPath, toFileUrl, truncateMiddle } from '@utils/path'
 import { clearDraft, loadDraft, loadRecentFiles, loadRecentProjects, pushRecentFile, pushRecentProject, saveDraft, type FolderEntry, type RecentItem, type SaveStatus } from '@utils/workbench'
 
+const compressImage = (file: File, maxSize = 1920, quality = 0.82): Promise<Blob> =>
+  new Promise((resolve) => {
+    const img = new Image()
+    const url = URL.createObjectURL(file)
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+      let { width, height } = img
+      if (width > maxSize || height > maxSize) {
+        if (width > height) { height = Math.round(height * maxSize / width); width = maxSize }
+        else { width = Math.round(width * maxSize / height); height = maxSize }
+      }
+      const canvas = document.createElement('canvas')
+      canvas.width = width; canvas.height = height
+      canvas.getContext('2d')!.drawImage(img, 0, 0, width, height)
+      canvas.toBlob((blob) => resolve(blob ?? file), file.type === 'image/png' ? 'image/png' : 'image/jpeg', quality)
+    }
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file) }
+    img.src = url
+  })
+
 const router = useRouter()
 
 const isLoading = ref(true)
 const isDragging = ref(false)
 const sidebarOpen = ref(true)
+const commandPaletteOpen = ref(false)
+const commandPaletteQuery = ref('')
+const commandPaletteIdx = ref(0)
+const cmdInputRef = ref<HTMLInputElement | null>(null)
 const focusMode = ref(false)
 const theme = ref<'light' | 'dark'>('light')
 const widthMode = ref<'narrow' | 'medium' | 'wide'>('medium')
@@ -125,10 +195,22 @@ const folderEntries = ref<FolderEntry[]>([])
 const searchPanelOpen = ref(false)
 const searchQuery = ref('')
 const replaceQuery = ref('')
+const searchMatches = ref<number[]>([])
+const currentMatchIdx = ref(-1)
 let vditor: Vditor | null = null
 let autosaveTimer: number | null = null
 let suspendInput = false
 let lastSavedContent = ''
+let outlineScrollCleanup: (() => void) | null = null
+
+const commandPaletteFiles = computed(() => {
+  const source = folderEntries.value.length > 0
+    ? folderEntries.value
+    : recentFiles.value.map(f => ({ path: f.path, name: f.name }))
+  if (!commandPaletteQuery.value.trim()) return source
+  const q = commandPaletteQuery.value.toLowerCase()
+  return source.filter(f => f.name.toLowerCase().includes(q) || f.path.toLowerCase().includes(q))
+})
 
 const currentDocumentName = computed(() => currentFilePath.value ? basename(currentFilePath.value) : '未命名文档')
 const currentDocumentMeta = computed(() => {
@@ -339,31 +421,128 @@ const exportHtml = async () => {
   if (savedPath) ElMessage.success(`已导出: ${savedPath}`)
 }
 
+const getAllMatchPositions = (text: string, query: string): number[] => {
+  const positions: number[] = []
+  let idx = 0
+  while (true) {
+    const found = text.indexOf(query, idx)
+    if (found < 0) break
+    positions.push(found)
+    idx = found + 1
+  }
+  return positions
+}
+
+const navigateToMatchInEditor = (query: string, matchIdx: number) => {
+  const editor = document.querySelector('.vditor-sv__editor') as HTMLElement | null
+  if (!editor) return
+
+  // Walk text nodes to find the Nth occurrence
+  const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT)
+  let currentPos = 0
+  let occurrenceCount = 0
+  const range = document.createRange()
+  let startSet = false
+  let endSet = false
+
+  let node: Node | null
+  while ((node = walker.nextNode())) {
+    const textNode = node as Text
+    const nodeText = textNode.data
+    const nodeLen = nodeText.length
+
+    let searchFrom = 0
+    while (true) {
+      const found = nodeText.indexOf(query, searchFrom)
+      if (found < 0) break
+      if (occurrenceCount === matchIdx) {
+        range.setStart(textNode, found)
+        startSet = true
+        const endInNode = found + query.length
+        if (endInNode <= nodeLen) {
+          range.setEnd(textNode, endInNode)
+          endSet = true
+        }
+      }
+      occurrenceCount++
+      searchFrom = found + 1
+    }
+
+    // Handle match spanning nodes (rare in sv mode, but handle gracefully)
+    if (startSet && !endSet) {
+      const remaining = query.length - (nodeLen - (range.startOffset))
+      if (remaining <= 0) {
+        range.setEnd(textNode, nodeLen)
+        endSet = true
+      }
+    }
+
+    if (startSet && endSet) break
+    currentPos += nodeLen
+  }
+
+  if (!startSet) return
+
+  const selection = window.getSelection()
+  selection?.removeAllRanges()
+  selection?.addRange(range)
+  editor.focus()
+  try {
+    ;(range.startContainer as Element).parentElement?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  } catch {
+    // ignore scroll errors
+  }
+}
+
 const runSearch = () => {
-  if (!vditor) return
-  const query = searchQuery.value
-  if (!query) return
+  if (!vditor || !searchQuery.value) return
   const value = vditor.getValue()
-  if (!value.includes(query)) {
+  const matches = getAllMatchPositions(value, searchQuery.value)
+  if (matches.length === 0) {
     ElMessage.warning('没有找到匹配内容')
+    searchMatches.value = []
+    currentMatchIdx.value = -1
     return
   }
-  vditor.focus()
-  ElMessage.success(`已定位搜索词：${query}`)
+  searchMatches.value = matches
+  currentMatchIdx.value = 0
+  navigateToMatchInEditor(searchQuery.value, 0)
+}
+
+const findNext = () => {
+  if (!searchQuery.value) return
+  if (searchMatches.value.length === 0) { runSearch(); return }
+  currentMatchIdx.value = (currentMatchIdx.value + 1) % searchMatches.value.length
+  navigateToMatchInEditor(searchQuery.value, currentMatchIdx.value)
+}
+
+const findPrev = () => {
+  if (!searchQuery.value) return
+  if (searchMatches.value.length === 0) { runSearch(); return }
+  currentMatchIdx.value = (currentMatchIdx.value - 1 + searchMatches.value.length) % searchMatches.value.length
+  navigateToMatchInEditor(searchQuery.value, currentMatchIdx.value)
 }
 
 const replaceNext = () => {
   if (!vditor || !searchQuery.value) return
   const value = vditor.getValue()
-  const index = value.indexOf(searchQuery.value)
-  if (index < 0) {
+  // Use current match position if available, otherwise find first
+  const idx = searchMatches.value.length > 0 && currentMatchIdx.value >= 0
+    ? searchMatches.value[currentMatchIdx.value]
+    : value.indexOf(searchQuery.value)
+  if (idx < 0) {
     ElMessage.warning('没有找到可替换内容')
     return
   }
-  const updated = `${value.slice(0, index)}${replaceQuery.value}${value.slice(index + searchQuery.value.length)}`
+  const updated = `${value.slice(0, idx)}${replaceQuery.value}${value.slice(idx + searchQuery.value.length)}`
   applyEditorContent(updated)
   saveDraft(updated)
   scheduleAutosave()
+  // Refresh matches after replacement
+  const newMatches = getAllMatchPositions(updated, searchQuery.value)
+  searchMatches.value = newMatches
+  currentMatchIdx.value = Math.min(currentMatchIdx.value, newMatches.length - 1)
+  if (newMatches.length > 0) navigateToMatchInEditor(searchQuery.value, currentMatchIdx.value)
 }
 
 const replaceAll = () => {
@@ -378,6 +557,48 @@ const replaceAll = () => {
   saveDraft(updated)
   scheduleAutosave()
   ElMessage.success('已全部替换')
+}
+
+const setupOutlineHighlight = () => {
+  const preview = (document.querySelector('.vditor-sv__preview') ?? document.querySelector('.vditor-preview')) as HTMLElement | null
+  if (!preview) return
+
+  const getHeadings = () => Array.from(preview.querySelectorAll('h1,h2,h3,h4,h5,h6')) as HTMLElement[]
+  const getItems = () => Array.from(document.querySelectorAll('.vditor-outline__item')) as HTMLElement[]
+
+  const highlight = () => {
+    const headings = getHeadings()
+    const items = getItems()
+    if (!headings.length || !items.length) return
+    const scrollTop = preview.scrollTop + 80
+    let activeIdx = 0
+    for (let i = 0; i < headings.length; i++) {
+      if (headings[i].offsetTop <= scrollTop) activeIdx = i
+    }
+    items.forEach((item, i) => item.classList.toggle('vditor-outline__item--current', i === activeIdx))
+  }
+
+  const clickHandler = (e: MouseEvent) => {
+    const item = (e.target as HTMLElement).closest('.vditor-outline__item') as HTMLElement | null
+    if (!item) return
+    const idx = getItems().indexOf(item)
+    const headings = getHeadings()
+    if (idx >= 0 && headings[idx]) {
+      e.stopPropagation()
+      e.preventDefault()
+      preview.scrollTo({ top: headings[idx].offsetTop - 20, behavior: 'smooth' })
+      getItems().forEach((el, i) => el.classList.toggle('vditor-outline__item--current', i === idx))
+    }
+  }
+
+  const outlineEl = document.querySelector('.vditor-outline') as HTMLElement | null
+  outlineEl?.addEventListener('click', clickHandler, true)
+  preview.addEventListener('scroll', highlight, { passive: true })
+
+  outlineScrollCleanup = () => {
+    preview.removeEventListener('scroll', highlight)
+    outlineEl?.removeEventListener('click', clickHandler, true)
+  }
 }
 
 const handleCommand = async (command: string) => {
@@ -446,8 +667,9 @@ const onDrop = async (event: DragEvent) => {
   }
   for (const file of files) {
     if (!file.type.startsWith('image/') || !vditor) continue
+    const compressed = await compressImage(file)
     if (currentFilePath.value && isTauriRuntime()) {
-      const buffer = await file.arrayBuffer()
+      const buffer = await compressed.arrayBuffer()
       const savedPath = await invoke<string>('save_image_for_document', {
         fileName: file.name,
         bytes: Array.from(new Uint8Array(buffer)),
@@ -459,8 +681,18 @@ const onDrop = async (event: DragEvent) => {
     }
     const reader = new FileReader()
     reader.onload = (e) => vditor?.insertValue(`![${file.name}](${e.target?.result as string})`)
-    reader.readAsDataURL(file)
+    reader.readAsDataURL(compressed)
   }
+}
+
+const cmdPaletteSelect = async (path: string) => {
+  commandPaletteOpen.value = false
+  await openFilePath(path)
+}
+
+const cmdPaletteConfirm = async () => {
+  const file = commandPaletteFiles.value[commandPaletteIdx.value]
+  if (file) await cmdPaletteSelect(file.path)
 }
 
 const handleKeydown = (event: KeyboardEvent) => {
@@ -489,12 +721,13 @@ const handleKeydown = (event: KeyboardEvent) => {
   }
   if (event.key.toLowerCase() === 'p') {
     event.preventDefault()
-    router.push({ path: '/export/pdf', query: { auto: '1', name: currentDocumentName.value } })
+    commandPaletteOpen.value = true
   }
 }
 
-const initVditor = () => {
-  vditor = new Vditor('vditor', {
+const initVditor = async () => {
+  const { default: VditorClass } = await import('vditor')
+  vditor = new VditorClass('vditor', {
     cdn: `${import.meta.env.BASE_URL}vditor`,
     lang: 'zh_CN',
     width: '100%',
@@ -510,8 +743,9 @@ const initVditor = () => {
       handler: async (files: File[]) => {
         for (const file of files) {
           if (!file.type.startsWith('image/')) continue
+          const compressed = await compressImage(file)
           if (currentFilePath.value && isTauriRuntime()) {
-            const buffer = await file.arrayBuffer()
+            const buffer = await compressed.arrayBuffer()
             const savedPath = await invoke<string>('save_image_for_document', {
               fileName: file.name,
               bytes: Array.from(new Uint8Array(buffer)),
@@ -522,7 +756,7 @@ const initVditor = () => {
           } else {
             const reader = new FileReader()
             reader.onload = (event) => vditor?.insertValue(`![${file.name}](${event.target?.result as string})`)
-            reader.readAsDataURL(file)
+            reader.readAsDataURL(compressed)
           }
         }
         return null
@@ -534,6 +768,7 @@ const initVditor = () => {
       isLoading.value = false
       const pending = consumePendingOpenPaths()
       if (pending && pending.length > 0) await handleDroppedPaths(pending)
+      setTimeout(setupOutlineHighlight, 600)
     },
     input: (value: string) => {
       if (suspendInput) return
@@ -544,6 +779,34 @@ const initVditor = () => {
     }
   })
 }
+
+watch(commandPaletteOpen, async (open) => {
+  if (open) {
+    commandPaletteQuery.value = ''
+    commandPaletteIdx.value = 0
+    await nextTick()
+    cmdInputRef.value?.focus()
+  }
+})
+
+watch(commandPaletteQuery, () => {
+  commandPaletteIdx.value = 0
+})
+
+watch(searchQuery, () => {
+  searchMatches.value = []
+  currentMatchIdx.value = -1
+})
+
+watch(searchPanelOpen, async (open) => {
+  if (open) {
+    await nextTick()
+    document.querySelector<HTMLInputElement>('.search-input')?.focus()
+  } else {
+    searchMatches.value = []
+    currentMatchIdx.value = -1
+  }
+})
 
 watch(pendingOpenPaths, async (paths) => {
   if (!paths || paths.length === 0) return
@@ -559,6 +822,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKeydown)
   if (autosaveTimer) window.clearTimeout(autosaveTimer)
+  outlineScrollCleanup?.()
   vditor?.destroy()
 })
 </script>
@@ -773,10 +1037,29 @@ onBeforeUnmount(() => {
 }
 
 .search-panel {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto auto auto;
-  gap: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   padding: 0 28px 14px;
+}
+
+.search-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.search-count {
+  font-size: 12px;
+  color: #64748b;
+  white-space: nowrap;
+  min-width: 40px;
+  text-align: center;
+}
+
+.icon-btn {
+  padding: 8px 10px;
+  font-size: 14px;
 }
 
 .search-input {
@@ -797,8 +1080,131 @@ onBeforeUnmount(() => {
     display: none;
   }
 
-  .search-panel {
-    grid-template-columns: 1fr;
+  .search-row {
+    flex-wrap: wrap;
   }
+}
+
+/* Command Palette */
+.cmd-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(15, 23, 42, 0.4);
+  backdrop-filter: blur(4px);
+  display: flex;
+  justify-content: center;
+  padding-top: 15vh;
+}
+
+.cmd-palette {
+  width: 560px;
+  max-width: calc(100vw - 40px);
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(20px);
+  border-radius: 20px;
+  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.2), 0 0 0 1px rgba(148, 163, 184, 0.2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: 60vh;
+}
+
+.theme-dark .cmd-palette {
+  background: rgba(15, 23, 42, 0.96);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(148, 163, 184, 0.1);
+}
+
+.cmd-input {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+  background: transparent;
+  padding: 16px 20px;
+  font-size: 15px;
+  color: inherit;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.cmd-input::placeholder {
+  color: #94a3b8;
+}
+
+.cmd-list {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.cmd-empty {
+  padding: 24px 20px;
+  color: #94a3b8;
+  font-size: 13px;
+  text-align: center;
+}
+
+.cmd-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 20px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+}
+
+.cmd-item:hover,
+.cmd-item.active {
+  background: rgba(37, 99, 235, 0.1);
+}
+
+.theme-dark .cmd-item:hover,
+.theme-dark .cmd-item.active {
+  background: rgba(37, 99, 235, 0.18);
+}
+
+.cmd-item-name {
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+  max-width: 200px;
+}
+
+.cmd-item-path {
+  font-size: 12px;
+  color: #94a3b8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+
+:deep(.vditor-outline__item--current) {
+  color: #2563eb !important;
+  font-weight: 600;
+  background: rgba(37, 99, 235, 0.08);
+  border-radius: 6px;
+}
+
+.theme-dark :deep(.vditor-outline__item--current) {
+  color: #60a5fa !important;
+  background: rgba(96, 165, 250, 0.12);
+}
+
+.cmd-footer {
+  display: flex;
+  gap: 16px;
+  padding: 10px 20px;
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+  font-size: 12px;
+  color: #94a3b8;
 }
 </style>
